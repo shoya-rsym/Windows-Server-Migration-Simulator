@@ -1,6 +1,7 @@
 import type {
   CommandOutput,
   Database,
+  DatabaseMigrationStrategy,
   DNS,
   IncidentDefinition,
   ManagerApp,
@@ -24,6 +25,7 @@ export interface ShellResult {
   flushDns?: boolean;
   transfer?: TransferPackage;
   databaseTransfer?: "export" | "import";
+  databaseAction?: "switchover";
 }
 
 export function jdbcPropertiesTargetDatabase(content: string, server: Server, database: Database): boolean {
@@ -74,6 +76,8 @@ export function createRuntimeEnvironments(scenario: Scenario): RuntimeEnvironmen
           ? []
           : scenario.assets.databases.find((database) => database.serverId === server.id)?.schemas ?? [],
         databaseRevision: 0,
+        databaseRole: server.stage === "source" ? "primary" : "unconfigured",
+        dataGuardEnabled: false,
       } satisfies RuntimeEnvironment,
     ]),
   );
@@ -183,6 +187,7 @@ export function runCommand(
   environments: RuntimeEnvironments,
   dns: DnsRuntime,
   allowedInboundPorts?: number[],
+  migrationStrategy: DatabaseMigrationStrategy = "expdp",
 ): ShellResult {
   const command = rawCommand.trim();
   const normalized = command.toLowerCase().replace(/\s+/g, " ");
@@ -281,19 +286,88 @@ export function runCommand(
   if (
     server.role === "database"
     && !environment.databaseVersion
-    && (normalized.startsWith("sqlplus") || normalized.startsWith("expdp") || normalized.startsWith("impdp"))
+    && (normalized.startsWith("sqlplus") || normalized.startsWith("expdp") || normalized.startsWith("impdp")
+      || normalized.startsWith("rman") || normalized.startsWith("dgmgrl"))
   ) {
-    return { output: ["Oracle Database is not installed. Run the scenario installer before using SQL*Plus or Data Pump."] };
+    return { output: ["Oracle Database is not installed. Run the scenario installer before using SQL*Plus or database migration commands."] };
   }
   if (
     server.role === "database"
     && environment.databaseVersion
     && !oracleListenerRunning(environment)
-    && (normalized.startsWith("sqlplus") || normalized.startsWith("expdp") || normalized.startsWith("impdp"))
+    && (normalized.startsWith("sqlplus") || normalized.startsWith("expdp") || normalized.startsWith("impdp")
+      || normalized.startsWith("rman") || normalized.startsWith("dgmgrl"))
   ) {
-    return { output: ["ORA-12541: TNS:no listener", "Start the Oracle service before using SQL*Plus or Data Pump."] };
+    return { output: ["ORA-12541: TNS:no listener", "Start the Oracle service and Listener before database migration operations."] };
+  }
+  if (args[0] === "rman") {
+    if (migrationStrategy !== "rman") {
+      return { output: ["The project plan selects a different database migration strategy. Check the project desk before using RMAN."] };
+    }
+    if (server.role !== "database") return { output: ["RMAN must be run on a database server."] };
+    if (args[1] === "backup" && server.stage === "source") {
+      if (environment.databaseRole !== "primary") return { output: ["RMAN-06004: Backup must run on the current primary database."] };
+      if (!environment.databaseSchemas.length) return { output: ["RMAN-06004: No database schemas are available to back up."] };
+      return {
+        output: [
+          `RMAN backup completed on ${server.hostname}.`,
+          `Database revision: ${environment.databaseRevision}`,
+          "Restore the backup on the target. Updates made afterward require a new backup and restore.",
+        ],
+        databaseTransfer: "export",
+      };
+    }
+    if (args[1] === "restore" && server.stage === "target") {
+      return { output: ["RMAN restore requested.", "Restore the latest source backup and recover the database."] , databaseTransfer: "import" };
+    }
+    return { output: ["Use `rman backup` on the source DB and `rman restore` on the target DB."] };
+  }
+  if (args[0] === "dgmgrl") {
+    if (migrationStrategy !== "dataguard") {
+      return { output: ["The project plan selects a different database migration strategy. Check the project desk before using Data Guard."] };
+    }
+    if (server.role !== "database") return { output: ["Data Guard Broker must be run for a database server."] };
+    if (args[1] === "prepare" && server.stage === "source") {
+      if (environment.databaseRole !== "primary") return { output: ["ORA-16664: Data Guard preparation must run on the current primary."] };
+      if (!environment.databaseSchemas.length) return { output: ["ORA-16024: No database schemas are available for the standby."] };
+      return {
+        output: [
+          `Standby preparation completed from ${server.hostname}.`,
+          `Synchronized revision: ${environment.databaseRevision}`,
+          "Start the standby on the target DB, then verify synchronization before switchover.",
+        ],
+        databaseTransfer: "export",
+      };
+    }
+    if (args[1] === "start" && args[2] === "standby" && server.stage === "target") {
+      return { output: ["Starting physical standby from the prepared primary snapshot."], databaseTransfer: "import" };
+    }
+    if (args[1] === "switchover" && server.stage === "target") {
+      if (environment.databaseRole !== "standby" || !environment.dataGuardEnabled) {
+        return { output: ["ORA-16664: Target is not configured as a synchronized standby. Prepare and start the standby first."] };
+      }
+      const sourceDatabaseServer = scenario.assets.servers.find((candidate) =>
+        candidate.role === "database" && candidate.stage === "source",
+      );
+      const source = sourceDatabaseServer ? environments[sourceDatabaseServer.id] : undefined;
+      if (!source || source.databaseRole !== "primary" || environment.databaseRevision !== source.databaseRevision) {
+        return { output: ["ORA-16766: Standby is not synchronized with the primary. Resolve the apply lag before switchover."] };
+      }
+      return {
+        output: [
+          "Data Guard switchover completed.",
+          `New primary revision: ${environment.databaseRevision}`,
+          "The former primary is now a standby.",
+        ],
+        databaseAction: "switchover",
+      };
+    }
+    return { output: ["Use `dgmgrl prepare` on the source, `dgmgrl start standby` on the target, then `dgmgrl switchover` after synchronization."] };
   }
   if (args[0] === "expdp" || args[0] === "impdp") {
+    if (migrationStrategy !== "expdp") {
+      return { output: ["The project plan selects a different database migration strategy. Use the commands for the selected method."] };
+    }
     if (server.role !== "database") {
       return { output: ["Data Pump must be run on a database server."] };
     }

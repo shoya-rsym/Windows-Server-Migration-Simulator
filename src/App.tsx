@@ -48,6 +48,7 @@ import type {
   Certificate,
   CloudWorkspace,
   ConsoleEntry,
+  DatabaseMigrationStrategy,
   DeploymentProvider,
   DifficultyMode,
   HypothesisNote,
@@ -380,6 +381,8 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         ...environment,
         installedSoftware: environment.installedSoftware ?? [...(server?.software ?? [])],
         databaseRevision: environment.databaseRevision ?? 0,
+        databaseRole: environment.databaseRole ?? (server?.stage === "source" ? "primary" : "unconfigured"),
+        dataGuardEnabled: environment.dataGuardEnabled ?? false,
       }];
     })));
     setDns(storedSave.dns);
@@ -469,6 +472,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       environments,
       dns,
       provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
+      projectWorkspace.migrationStrategy,
     );
     const normalized = rawCommand.trim().toLowerCase().replace(/\s+/g, " ");
     const lastAuditEventIndex = (name: string) => auditEvents.reduce(
@@ -481,23 +485,42 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     const rollbackIsCurrent = latestRollbackIndex > latestCutoverIndex;
 
     if (result.databaseTransfer === "export") {
-      exportAsset(serverId, "database");
+      exportAsset(serverId, "database", undefined, projectWorkspace.migrationStrategy);
     } else if (result.databaseTransfer === "import") {
       if (!transfer || transfer.kind !== "database" || transfer.sourceServerId === serverId) {
-        result.output = ["ORA-39002: invalid operation", "Run expdp on the source database before importing on the target."];
-        notify("インポート用のData Pumpデータがありません。現行DBでexpdpを実行してください。");
+        result.output = ["ORA-39002: invalid operation", "Create a database migration package on the source DB before importing on the target."];
+        notify("移行データがありません。選択した方式の手順で移行元DBから準備してください。");
+      } else if ((transfer.strategy ?? "expdp") !== projectWorkspace.migrationStrategy) {
+        result.output = ["ORA-39002: migration method mismatch", "The prepared database package does not match the strategy selected in the project plan."];
+        notify("移行データの方式と案件デスクの選択が一致しません。選択方式で移行データを作成し直してください。");
       } else {
         const { schemas, revision } = transfer;
+        const synchronizedRevision = projectWorkspace.migrationStrategy === "dataguard" && sourceDatabase
+          ? environments[sourceDatabase.id]?.databaseRevision ?? revision
+          : revision;
         if (importAsset(serverId)) {
-          result.output = [
-            `Imported schemas: ${schemas.join(", ")}`,
-            `Database revision: ${revision}`,
-            "Job \"SYS_IMPORT_SCHEMA_01\" successfully completed.",
-          ];
+          result.output = projectWorkspace.migrationStrategy === "rman"
+            ? [`RMAN restore completed.`, `Recovered schemas: ${schemas.join(", ")}`, `Database revision: ${revision}`, "Updates after this backup require another backup and restore."]
+            : projectWorkspace.migrationStrategy === "dataguard"
+              ? [`Physical standby started.`, `Applied schemas: ${schemas.join(", ")}`, `Synchronized revision: ${synchronizedRevision}`, "Subsequent source updates will be applied automatically."]
+              : [`Imported schemas: ${schemas.join(", ")}`, `Database revision: ${revision}`, "Job \"SYS_IMPORT_SCHEMA_01\" successfully completed."];
         } else {
           result.output = ["ORA-39002: Data Pump import failed. Check the target database and transfer package."];
         }
       }
+    }
+    if (result.databaseAction === "switchover") {
+      if (!sourceDatabase || !targetDatabase) throw new Error("Data Guard switchover requires source and target database servers.");
+      const sourceEnvironment = environments[sourceDatabase.id];
+      const targetEnvironment = environments[targetDatabase.id];
+      if (!sourceEnvironment || !targetEnvironment) throw new Error("Data Guard database runtime state is unavailable.");
+      setEnvironments((previous) => ({
+        ...previous,
+        [sourceDatabase.id]: { ...sourceEnvironment, databaseRole: "standby", dataGuardEnabled: true },
+        [targetDatabase.id]: { ...targetEnvironment, databaseRole: "primary" },
+      }));
+      recordAuditEvent("database:dataguard-switchover", true);
+      recordAuditEvent("database:final-sync", true);
     }
 
     if (result.clear) {
@@ -583,7 +606,12 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setInputs((previous) => ({ ...previous, [serverId]: "" }));
   };
 
-  const exportAsset = (serverId: string, kind: TransferPackage["kind"], content?: string) => {
+  const exportAsset = (
+    serverId: string,
+    kind: TransferPackage["kind"],
+    content?: string,
+    databaseStrategy: DatabaseMigrationStrategy = "expdp",
+  ) => {
     const environment = environments[serverId];
     if (!environment) throw new Error(`Unknown server session: ${serverId}`);
 
@@ -605,9 +633,17 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         sourceServerId: serverId,
         schemas: environment.databaseSchemas,
         revision: environment.databaseRevision ?? 0,
+        strategy: databaseStrategy,
       });
+      recordAuditEvent(databaseStrategy === "expdp"
+        ? "database:expdp-export"
+        : databaseStrategy === "rman"
+          ? "database:rman-backup"
+          : "database:dataguard-prepare", true);
     }
-    notify(kind === "database" ? "Data Pumpの移行データを作成しました。" : "エクスポート用の移行データを作成しました");
+    notify(kind === "database"
+      ? databaseStrategy === "rman" ? "RMANバックアップを作成しました。" : databaseStrategy === "dataguard" ? "Data Guardの初期同期データを準備しました。" : "Data Pumpの移行データを作成しました。"
+      : "エクスポート用の移行データを作成しました");
   };
 
   const importAsset = (serverId: string) => {
@@ -624,8 +660,12 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       }
     }
     if (targetServer.stage === "target" && transfer.kind === "database") {
+      if ((transfer.strategy ?? "expdp") !== projectWorkspace.migrationStrategy) {
+        notify("移行データの方式と案件デスクの選択が一致しません。選択方式で移行データを作成し直してください。");
+        return false;
+      }
       if (!target.databaseVersion) {
-        notify("Data Pumpのインポート前に、移行先へOracle Databaseをインストールしてください。");
+        notify("移行先へOracle Databaseをインストールしてからデータを適用してください。");
         return false;
       }
       if (!target.services.some((service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running")) {
@@ -633,6 +673,10 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         return false;
       }
     }
+    const sourceRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;
+    const appliedRevision = transfer.kind === "database" && transfer.strategy === "dataguard"
+      ? sourceRevision
+      : transfer.kind === "database" ? transfer.revision ?? 0 : 0;
 
     if (transfer.kind === "services") {
       const items: RuntimeService[] = transfer.items.map((service) => ({
@@ -660,7 +704,9 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         [serverId]: {
           ...target,
           databaseSchemas: [...transfer.schemas],
-          databaseRevision: transfer.revision ?? 0,
+          databaseRevision: appliedRevision,
+          databaseRole: transfer.strategy === "dataguard" ? "standby" : target.databaseRole,
+          dataGuardEnabled: transfer.strategy === "dataguard",
         },
       }));
     }
@@ -674,19 +720,30 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       database: "migrate:database",
     };
     if (transfer.kind !== "jdbc") recordAuditEvent(auditKind[transfer.kind]);
-    const sourceRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;
+    if (transfer.kind === "database") {
+      recordAuditEvent(transfer.strategy === "rman"
+        ? "database:rman-restore"
+        : transfer.strategy === "dataguard"
+          ? "database:dataguard-start-standby"
+          : "database:expdp-import", true);
+    }
     const completedFinalSync = transfer.kind === "database"
       && serverId === targetDatabase?.id
       && sourceRevision > 0
-      && transfer.revision === sourceRevision;
+      && transfer.revision === sourceRevision
+      && transfer.strategy !== "dataguard";
     if (completedFinalSync) recordAuditEvent("database:final-sync");
     setTransfer(null);
     notify(transfer.kind === "jdbc"
       ? "JDBC設定を受け取りました。DBSV02向けに接続先を修正して保存してください。"
-      : completedFinalSync
+      : completedFinalSync && transfer.strategy !== "dataguard"
         ? `DBSV02を現行DBの最新データ世代 ${sourceRevision} に同期しました。`
+        : transfer.kind === "database" && transfer.strategy === "dataguard" && sourceRevision > transfer.revision
+          ? `Data Guard standbyを現行DBの最新データ世代 ${sourceRevision} まで同期しました。`
         : transfer.kind === "database" && sourceRevision > transfer.revision
-          ? `データ世代 ${transfer.revision} を取り込みましたが、現行DBは世代 ${sourceRevision} です。最新状態を再エクスポートしてください。`
+            ? transfer.strategy === "rman"
+              ? `バックアップ世代 ${transfer.revision} を復元しましたが、現行DBは世代 ${sourceRevision} です。再バックアップしてリストアしてください。`
+              : `データ世代 ${transfer.revision} を取り込みましたが、現行DBは世代 ${sourceRevision} です。最新状態を再エクスポートしてください。`
           : "移行データを取り込みました。設定値を確認してください");
     return true;
   };
@@ -791,8 +848,9 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     const server = scenario.assets.servers.find((item) => item.id === serverId);
     const environment = environments[serverId];
     if (!server || !environment) throw new Error(`Unknown database session: ${serverId}`);
-    if (server.role !== "database" || server.stage !== "source") {
-      throw new Error("業務更新のシミュレーションは現行DBサーバーでのみ実行できます。");
+    if (server.role !== "database" || environment.databaseRole !== "primary") {
+      notify("業務更新は現在のPrimary DBでのみ実行できます。");
+      return;
     }
     const oracleService = environment.services.find((service) => service.name.toLowerCase().startsWith("oracleservice"));
     if (!oracleService || oracleService.status !== "running") {
@@ -803,13 +861,33 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setEnvironments((previous) => {
       const current = previous[serverId];
       if (!current) throw new Error(`Unknown database session: ${serverId}`);
-      return {
+      const standbyId = [sourceDatabase?.id, targetDatabase?.id].find((candidateId) =>
+        candidateId !== undefined
+        && candidateId !== serverId
+        && previous[candidateId]?.dataGuardEnabled
+        && previous[candidateId]?.databaseRole === "standby",
+      );
+      const standby = standbyId ? previous[standbyId] : undefined;
+      const nextEnvironments = {
         ...previous,
         [serverId]: { ...current, databaseRevision: (current.databaseRevision ?? 0) + 1 },
       };
+      if (standby && standbyId) {
+        nextEnvironments[standbyId] = { ...standby, databaseRevision: nextRevision };
+      }
+      return {
+        ...nextEnvironments,
+      };
     });
     recordAuditEvent("database:business-write");
-    notify(`現行DBに業務更新を記録しました。データ世代: ${nextRevision} (行データ自体はシミュレーションされません)`);
+    const standby = [sourceDatabase?.id, targetDatabase?.id].some((candidateId) =>
+      candidateId !== undefined
+      && candidateId !== serverId
+      && environments[candidateId]?.dataGuardEnabled
+      && environments[candidateId]?.databaseRole === "standby",
+    );
+    if (standby) recordAuditEvent("database:dataguard-sync", true);
+    notify(`Primary DBに業務更新を記録しました。データ世代: ${nextRevision}${standby ? " (Data Guard standbyへ同期)" : " (行データ自体はシミュレーションされません)"}`);
   };
 
   const addHypothesis = (event: React.FormEvent<HTMLFormElement>) => {
@@ -986,6 +1064,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                 app={activeApps[serverId] ?? null}
                 shellMode={shellModes[serverId] ?? "cmd"}
                 transfer={transfer}
+                migrationStrategy={projectWorkspace.migrationStrategy}
                 draft={activeApp === "resinConfig"
                   ? drafts[resinConfigDraftKey(serverId)] ?? environment.configurationFiles[0]?.content ?? ""
                   : drafts[jdbcDraftKey(serverId)] ?? environment.jdbcProperties ?? ""}
@@ -1413,7 +1492,7 @@ function ProjectDeskModal({
               <label>切替何日前に利用者へ周知するか<input type="number" min={0} value={project.noticeLeadDays} onChange={(event) => update({ noticeLeadDays: Math.max(0, Number(event.target.value)) })} /></label>
               <label>切戻し手順・判断条件<textarea rows={4} value={project.rollbackPlan} onChange={(event) => update({ rollbackPlan: event.target.value })} placeholder="例: 23:30までにログイン確認できない場合、DNSを旧APへ戻し、旧AP/DBは翌営業日まで維持する。" /></label>
             </div>
-            <p className="project-plan-note">DB移行方式は計画上の選択です。現在のSQL*Plus画面ではData Pumpの疑似操作を提供します。RMAN・Data Guardの動作差分は後続段階で実装します。</p>
+            <p className="project-plan-note">選択した方式はDBサーバーの端末コマンドに反映されます。Data Pumpはexpdp / impdp、RMANは rman backup / rman restore、Data Guardは dgmgrl prepare / dgmgrl start standby / dgmgrl switchover を実行してください。</p>
             <p className="project-plan-note">TTL短縮は切替3日前以上に計画し、DNSマネージャーでTTLだけを先に適用してください。シミュレーションでは待機完了として扱いますが、計画日数とTTL適用の作業順は監査レポートで別々に確認します。</p>
             <p className={`project-limit-note ${project.plannedDowntimeMinutes > scenario.project.downtimeLimitMinutes ? "warning" : ""}`}>
               許容停止時間: {scenario.project.downtimeLimitMinutes} 分 · 現在の計画: {project.plannedDowntimeMinutes} 分
@@ -1528,6 +1607,7 @@ function ServerSession({
   app,
   shellMode,
   transfer,
+  migrationStrategy,
   draft,
   taskRuns,
   onServerChange,
@@ -1562,6 +1642,7 @@ function ServerSession({
   app: ManagerApp | null;
   shellMode: ShellMode;
   transfer: TransferPackage | null;
+  migrationStrategy: DatabaseMigrationStrategy;
   draft: string;
   taskRuns: Record<string, string>;
   onServerChange: (id: string) => void;
@@ -1621,6 +1702,7 @@ function ServerSession({
             dns={dns}
             dnsDraft={dnsDraft}
             transfer={transfer}
+            migrationStrategy={migrationStrategy}
             draft={draft}
             issues={issueEvents}
             taskRuns={taskRuns}
@@ -1664,6 +1746,7 @@ function ManagerWindow({
   dns,
   dnsDraft,
   transfer,
+  migrationStrategy,
   draft,
   issues,
   taskRuns,
@@ -1688,11 +1771,12 @@ function ManagerWindow({
   dns: DnsRuntime;
   dnsDraft: DnsRuntime;
   transfer: TransferPackage | null;
+  migrationStrategy: DatabaseMigrationStrategy;
   draft: string;
   issues: Array<{ source: string; type: "Error" | "Warning"; message: string }>;
   taskRuns: Record<string, string>;
   sourceDatabaseRevision: number;
-  onExport: (serverId: string, kind: TransferPackage["kind"], content?: string) => void;
+  onExport: (serverId: string, kind: TransferPackage["kind"], content?: string, databaseStrategy?: DatabaseMigrationStrategy) => void;
   onImport: (serverId: string) => void;
   onServiceToggle: (serverId: string, serviceId: string) => void;
   onSoftwareInstall: (serverId: string, softwareName: string) => void;
@@ -1807,20 +1891,26 @@ function ManagerWindow({
         <div className="database-console"><span>SQL*Plus: Release {environment.databaseVersion ?? "未インストール"} - Production</span><span>Connected to:</span><strong>Oracle Database {environment.databaseVersion ?? "未インストール"}</strong><span>接続先: {server.hostname}</span></div>
         {server.stage === "target" && (!environment.databaseVersion
           || !environment.services.some((service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running"))
-          && <p className="migration-instruction">{environment.databaseVersion ? "Oracleサービスが停止しています。Data Pumpを実行する前にservices.mscで起動してください。" : "Oracle Databaseが未導入です。セットアップからインストールし、services.mscでOracleサービスを起動してください。"}</p>}
+          && <p className="migration-instruction">{environment.databaseVersion ? "Oracleサービスが停止しています。移行操作の前にservices.mscで起動してください。" : "Oracle Databaseが未導入です。セットアップからインストールし、services.mscでOracleサービスを起動してください。"}</p>}
         <div className="database-schema-title"><strong>ユーザースキーマ</strong><span>{dbSchemas.length} 件</span></div>
         {dbSchemas.length ? <div className="schema-list">{dbSchemas.map((schemaName) => <span key={schemaName}><Database size={13} />{schemaName}<i>VALID</i></span>)}</div> : <EmptyManager text="ユーザースキーマがありません。" />}
         <div className={`database-revision ${dataBehind ? "behind" : ""}`}>
-          <span>{server.stage === "source" ? "現行DBデータ世代" : "新DBデータ世代"}: {environment.databaseRevision ?? 0}</span>
+          <span>{environment.databaseRole === "unconfigured" ? "DBロール未構成" : `${environment.databaseRole === "primary" ? "Primary" : "Standby"} · データ世代 ${environment.databaseRevision ?? 0}`}</span>
           {server.stage === "target" && <span>現行DB: {sourceDatabaseRevision} · {dataBehind ? "未同期の更新あり" : "同期済み"}</span>}
         </div>
-        {server.role === "database" && server.stage === "source" && <button className="database-write-button" onClick={() => onDatabaseWrite(server.id)}>業務更新を1件発生させる</button>}
-        <div className="manager-bottom-actions"><span>Data Pump · データ世代を含むスナップショット</span><ManagerTransfer
+        {server.role === "database" && environment.databaseRole === "primary" && <button className="database-write-button" onClick={() => onDatabaseWrite(server.id)}>業務更新を1件発生させる</button>}
+        <p className="migration-instruction">{migrationStrategy === "expdp"
+          ? "Data Pump: 移行元でexpdp、移行先でimpdp。業務更新後は再実行して最終同期します。"
+          : migrationStrategy === "rman"
+            ? "RMAN: 移行元で rman backup、移行先で rman restore。バックアップ後の更新は再バックアップ・リストアが必要です。"
+            : "Data Guard: 移行元で dgmgrl prepare、移行先で dgmgrl start standby。更新は自動同期され、同期後に移行先で dgmgrl switchover を実行します。"}</p>
+        <div className="manager-bottom-actions"><span>{migrationStrategy === "expdp" ? "Data Pump" : migrationStrategy === "rman" ? "RMAN" : "Data Guard"} · 移行方式</span><ManagerTransfer
           kind="database"
           source={dbSchemas.length > 0}
           canImport={canImport}
-          importLabel={server.stage === "target" && transfer?.kind === "database" && transfer.revision === sourceDatabaseRevision && sourceDatabaseRevision > 0 ? "最終同期" : "インポート"}
-          onExport={() => onExport(server.id, "database")}
+          importLabel={server.stage === "target" && transfer?.kind === "database" && transfer.revision === sourceDatabaseRevision && sourceDatabaseRevision > 0 ? "同期済みデータを適用" : migrationStrategy === "dataguard" ? "Standby開始" : migrationStrategy === "rman" ? "リストア" : "インポート"}
+          exportLabel={migrationStrategy === "expdp" ? "Data Pump準備" : migrationStrategy === "rman" ? "バックアップ" : "初期同期準備"}
+          onExport={() => onExport(server.id, "database", undefined, migrationStrategy)}
           onImport={() => onImport(server.id)}
         /></div>
       </ManagerFrame>}
@@ -1832,9 +1922,9 @@ function ManagerFrame({ title, icon, children }: { title: string; icon: React.Re
   return <div className="mmc-frame"><div className="mmc-frame-title">{icon}<strong>{title}</strong><span>▣</span></div><div className="mmc-content">{children}</div></div>;
 }
 
-function ManagerTransfer({ kind, source, canImport, importLabel, onExport, onImport }: { kind: TransferPackage["kind"]; source: boolean; canImport: boolean | undefined; importLabel?: string; onExport: () => void; onImport: () => void }) {
+function ManagerTransfer({ kind, source, canImport, exportLabel, importLabel, onExport, onImport }: { kind: TransferPackage["kind"]; source: boolean; canImport: boolean | undefined; exportLabel?: string; importLabel?: string; onExport: () => void; onImport: () => void }) {
   return <div className="manager-action-group">
-    {source && <button className="manager-secondary-button" onClick={onExport}><ArrowUpFromLine size={13} />エクスポート</button>}
+    {source && <button className="manager-secondary-button" onClick={onExport}><ArrowUpFromLine size={13} />{exportLabel ?? "エクスポート"}</button>}
     {canImport && <button className="manager-primary-button" onClick={onImport}><ArrowDownToLine size={13} />{importLabel ?? "インポート"}</button>}
     {!source && !canImport && <span className="manager-hint">{kind === "database" ? "移行データなし" : "移行元でエクスポートしてください"}</span>}
   </div>;

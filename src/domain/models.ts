@@ -47,6 +47,7 @@ export interface InvestigationNote {
 }
 
 export type CutoverDecision = "pending" | "go" | "no-go" | "rollback" | "continue";
+export type DatabaseMigrationStrategy = "expdp" | "rman" | "dataguard";
 
 export interface ProjectWorkspace {
   investigationNotes: InvestigationNote[];
@@ -58,7 +59,7 @@ export interface ProjectWorkspace {
   noticeSubject: string;
   noticeBody: string;
   noticeSent: boolean;
-  migrationStrategy: "expdp" | "rman" | "dataguard";
+  migrationStrategy: DatabaseMigrationStrategy;
   rollbackPlan: string;
   cutoverDecision: CutoverDecision;
 }
@@ -221,6 +222,8 @@ export interface RuntimeEnvironment {
   databaseVersion: string | null;
   databaseSchemas: string[];
   databaseRevision: number;
+  databaseRole: "primary" | "standby" | "unconfigured";
+  dataGuardEnabled: boolean;
 }
 
 export type RuntimeEnvironments = Record<string, RuntimeEnvironment>;
@@ -231,7 +234,7 @@ export type TransferPackage =
   | { kind: "certificates"; sourceServerId: string; items: Certificate[] }
   | { kind: "configFile"; sourceServerId: string; items: ConfigFile[] }
   | { kind: "jdbc"; sourceServerId: string; content: string }
-  | { kind: "database"; sourceServerId: string; schemas: string[]; revision: number };
+  | { kind: "database"; sourceServerId: string; schemas: string[]; revision: number; strategy?: DatabaseMigrationStrategy };
 
 export interface ConsoleEntry {
   id: number;

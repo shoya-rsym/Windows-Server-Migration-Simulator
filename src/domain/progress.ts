@@ -19,6 +19,24 @@ function lastEventIndex(events: AuditEvent[], name: string, beforeIndex = events
   return -1;
 }
 
+function hasCompletedDatabaseMigration(strategy: ProjectWorkspace["migrationStrategy"], events: AuditEvent[]): boolean {
+  const eventNames = new Set(events.map((event) => event.name));
+  if (strategy === "expdp") {
+    return eventNames.has("database:expdp-export")
+      && eventNames.has("database:expdp-import")
+      && eventNames.has("migrate:database");
+  }
+  if (strategy === "rman") {
+    return eventNames.has("database:rman-backup")
+      && eventNames.has("database:rman-restore")
+      && eventNames.has("migrate:database");
+  }
+  return eventNames.has("database:dataguard-prepare")
+    && eventNames.has("database:dataguard-start-standby")
+    && eventNames.has("database:dataguard-switchover")
+    && eventNames.has("migrate:database");
+}
+
 function auditRequirementIndex(checkId: string, requiredEvent: string, scenario: Scenario, events: AuditEvent[]): number {
   const cutoverIndex = lastEventIndex(events, "dns:cutover");
   const rollbackIndex = lastEventIndex(events, "dns:rollback");
@@ -167,7 +185,8 @@ export function calculateAuditReport(
     cutoverDecision: "pending" as const,
   };
   const dataSyncPending = Boolean(databaseRevisions && databaseRevisions.source > databaseRevisions.target);
-  const projectScores = calculateProjectScores(scenario, events, incidentCount, successRate, project, dataSyncPending);
+  const databaseMigrationComplete = hasCompletedDatabaseMigration(project.migrationStrategy, events);
+  const projectScores = calculateProjectScores(scenario, events, incidentCount, successRate, project, dataSyncPending, databaseMigrationComplete);
   const projectFindings = getProjectFindings(scenario, events, project, dataSyncPending);
   const averageScore = Math.round(projectScores.reduce((total, item) => total + item.score, 0) / projectScores.length);
   const overallGrade = gradeFor(averageScore);
@@ -195,6 +214,7 @@ function calculateProjectScores(
   migrationRate: number,
   project: ProjectWorkspace,
   dataSyncPending: boolean,
+  databaseMigrationComplete: boolean,
 ): AuditReport["projectScores"] {
   const eventNames = new Set(events.map((event) => event.name));
   const investigationEvents = events.filter((event) => event.name.startsWith("inspect:") || event.name.startsWith("investigate:"));
@@ -233,7 +253,7 @@ function calculateProjectScores(
   return [
     { id: "research", label: "調査品質", score: researchScore },
     { id: "design", label: "設計品質", score: designScore },
-    { id: "migration", label: "移行品質", score: Math.max(0, migrationRate - (dataSyncPending ? 20 : 0)) },
+    { id: "migration", label: "移行品質", score: Math.max(0, migrationRate - (dataSyncPending ? 20 : 0) - (databaseMigrationComplete ? 0 : 20)) },
     { id: "incident", label: "障害対応", score: incidentResponseScore },
     { id: "security", label: "セキュリティ", score: securityScore },
     { id: "operations", label: "運用品質", score: operationsScore },
@@ -294,10 +314,27 @@ function getProjectFindings(
     });
   }
   if (dataSyncPending) {
+    const syncRemediation = project.migrationStrategy === "rman"
+      ? "現行DBで rman backup を再実行し、新DBで rman restore して、画面のデータ世代を一致させてください。バックアップ後の更新は復旧側へ自動反映されません。"
+      : project.migrationStrategy === "dataguard"
+        ? "Data GuardのApply状態を確認してください。Standbyを再同期し、移行元と移行先のデータ世代が一致してからスイッチオーバーしてください。"
+        : "現行DBで expdp を再実行し、新DBで impdp して、画面のデータ世代を一致させてからGo判定します。";
     findings.push({
       id: "database-final-sync",
       title: "現行DBに新DBへ未反映の業務更新があります",
-      remediation: "切替前に現行DBを再エクスポートし、新DBへインポートしてください。画面のデータ世代が一致したことを確認してからGo判定します。",
+      remediation: syncRemediation,
+    });
+  }
+  if (!hasCompletedDatabaseMigration(project.migrationStrategy, events)) {
+    const remediation = project.migrationStrategy === "expdp"
+      ? "計画方式に合わせ、現行DBで expdp、新DBで impdp を実行してください。業務更新後は最新世代を再エクスポート・インポートします。"
+      : project.migrationStrategy === "rman"
+        ? "現行DBで rman backup、新DBで rman restore を実行してください。バックアップ後に業務更新があれば、停止時間内に再バックアップ・リストアして最終世代を合わせます。"
+        : "現行DBで dgmgrl prepare、新DBで dgmgrl start standby を実行します。データ世代が一致した後、新DBで dgmgrl switchover を実行してください。";
+    findings.push({
+      id: "database-migration-strategy",
+      title: `計画したDB移行方式 (${project.migrationStrategy}) の実行が完了していません`,
+      remediation,
     });
   }
   if (project.ttlLeadDays < 3) {
