@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 import {
   createRuntimeEnvironments,
+  createExpertRuntimeEnvironments,
+  chooseExpertIncident,
   getEventLog,
   initialDnsRuntime,
   jdbcPropertiesTargetDatabase,
@@ -94,6 +96,7 @@ interface SimulationSave {
   startedAt: number;
   entryId: number;
   projectWorkspace?: ProjectWorkspace;
+  expertIncidentId?: string | null;
 }
 
 function isSimulationSave(value: unknown): value is SimulationSave {
@@ -125,7 +128,7 @@ function isSimulationSave(value: unknown): value is SimulationSave {
       && ["pending", "go", "no-go", "rollback", "continue"].includes(String(workspace.cutoverDecision));
   };
   return record.version === 2
-    && ["tutorial", "beginner", "intermediate", "advanced"].includes(String(record.mode))
+    && ["tutorial", "beginner", "intermediate", "advanced", "expert"].includes(String(record.mode))
     && ["onprem", "aws", "azure"].includes(String(record.provider))
     && Array.isArray(record.paneServerIds) && record.paneServerIds.length === 2 && isStringArray(record.paneServerIds)
     && isRecord(record.environments)
@@ -138,6 +141,7 @@ function isSimulationSave(value: unknown): value is SimulationSave {
     && isStringArray(record.completedObjectives)
     && Array.isArray(record.knowledgeRecords) && Array.isArray(record.auditEvents)
     && isProjectWorkspace(record.projectWorkspace)
+    && (record.expertIncidentId === undefined || record.expertIncidentId === null || typeof record.expertIncidentId === "string")
     && typeof record.startedAt === "number" && typeof record.entryId === "number";
 }
 
@@ -222,6 +226,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const [knowledgeRecords, setKnowledgeRecords] = useState<KnowledgeRecord[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [projectWorkspace, setProjectWorkspace] = useState<ProjectWorkspace>(() => createInitialProjectWorkspace(scenario.project));
+  const [expertIncidentId, setExpertIncidentId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(Date.now);
   const [notice, setNotice] = useState("");
   const [entryId, setEntryId] = useState(0);
@@ -250,6 +255,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       startedAt,
       entryId,
       projectWorkspace,
+      expertIncidentId,
     };
     try {
       window.localStorage.setItem(saveKey, JSON.stringify(snapshot));
@@ -261,7 +267,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   }, [
     sessionStarted, mode, provider, paneServerIds, environments, dns, dnsDraft, history, inputs,
     activeApps, shellModes, transfer, hypotheses, drafts, taskRuns, completedObjectives, knowledgeRecords,
-    auditEvents, startedAt, entryId, projectWorkspace,
+    auditEvents, startedAt, entryId, projectWorkspace, expertIncidentId,
   ]);
 
   const recordAuditEvent = (name: string) => {
@@ -282,8 +288,12 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     const serverId = desktopServerId;
     const isManager = isManagerShortcut(desktopShortcut);
     setPaneServerIds([serverId, initialPanes[1]]);
-    setEnvironments(createRuntimeEnvironments(scenario));
-    const startupDns = mode === "advanced" && targetApplication
+    const expertIncident = mode === "expert" ? chooseExpertIncident(scenario) : null;
+    setExpertIncidentId(expertIncident?.id ?? null);
+    setEnvironments(expertIncident
+      ? createExpertRuntimeEnvironments(scenario, expertIncident.id)
+      : createRuntimeEnvironments(scenario));
+    const startupDns = (mode === "advanced" || mode === "expert") && targetApplication
       ? { ...initialDns, address: targetApplication.ipAddress, cachedAddress: targetApplication.ipAddress }
       : initialDns;
     setDns(startupDns);
@@ -317,7 +327,10 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setMode(storedSave.mode);
     setProvider(storedSave.provider);
     setPaneServerIds(storedSave.paneServerIds);
-    setEnvironments(storedSave.environments);
+    setEnvironments(Object.fromEntries(Object.entries(storedSave.environments).map(([serverId, environment]) => [
+      serverId,
+      { ...environment, databaseRevision: environment.databaseRevision ?? 0 },
+    ])));
     setDns(storedSave.dns);
     setDnsDraft(storedSave.dnsDraft);
     setHistory(storedSave.history);
@@ -334,6 +347,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setKnowledgeRecords(storedSave.knowledgeRecords);
     setAuditEvents(storedSave.auditEvents);
     setProjectWorkspace(storedSave.projectWorkspace ?? createInitialProjectWorkspace(scenario.project));
+    setExpertIncidentId(storedSave.expertIncidentId ?? null);
     setStartedAt(storedSave.startedAt);
     setEntryId(storedSave.entryId);
     setSessionStarted(true);
@@ -468,7 +482,12 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       if (!environment.configurationFiles.length) throw new Error("移行元に Resin 設定ファイルがありません。");
       setTransfer({ kind, sourceServerId: serverId, items: environment.configurationFiles });
     } else {
-      setTransfer({ kind, sourceServerId: serverId, schemas: environment.databaseSchemas });
+      setTransfer({
+        kind,
+        sourceServerId: serverId,
+        schemas: environment.databaseSchemas,
+        revision: environment.databaseRevision ?? 0,
+      });
     }
     notify("エクスポート用の移行データを作成しました");
   };
@@ -499,7 +518,14 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       setEnvironments((previous) => ({ ...previous, [serverId]: { ...target, jdbcProperties: transfer.content } }));
       setDrafts((previous) => ({ ...previous, [jdbcDraftKey(serverId)]: transfer.content }));
     } else {
-      setEnvironments((previous) => ({ ...previous, [serverId]: { ...target, databaseSchemas: [...transfer.schemas] } }));
+      setEnvironments((previous) => ({
+        ...previous,
+        [serverId]: {
+          ...target,
+          databaseSchemas: [...transfer.schemas],
+          databaseRevision: transfer.revision ?? 0,
+        },
+      }));
     }
 
     const auditKind: Record<TransferPackage["kind"], string> = {
@@ -511,10 +537,20 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       database: "migrate:database",
     };
     if (transfer.kind !== "jdbc") recordAuditEvent(auditKind[transfer.kind]);
+    const sourceRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;
+    const completedFinalSync = transfer.kind === "database"
+      && serverId === targetDatabase?.id
+      && sourceRevision > 0
+      && transfer.revision === sourceRevision;
+    if (completedFinalSync) recordAuditEvent("database:final-sync");
     setTransfer(null);
     notify(transfer.kind === "jdbc"
       ? "JDBC設定を受け取りました。DBSV02向けに接続先を修正して保存してください。"
-      : "移行データを取り込みました。設定値を確認してください");
+      : completedFinalSync
+        ? `DBSV02を現行DBの最新データ世代 ${sourceRevision} に同期しました。`
+        : transfer.kind === "database" && sourceRevision > transfer.revision
+          ? `データ世代 ${transfer.revision} を取り込みましたが、現行DBは世代 ${sourceRevision} です。最新状態を再エクスポートしてください。`
+          : "移行データを取り込みました。設定値を確認してください");
   };
 
   const toggleService = (serverId: string, serviceId: string) => {
@@ -535,6 +571,31 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         ),
       },
     }));
+  };
+
+  const recordBusinessWrite = (serverId: string) => {
+    const server = scenario.assets.servers.find((item) => item.id === serverId);
+    const environment = environments[serverId];
+    if (!server || !environment) throw new Error(`Unknown database session: ${serverId}`);
+    if (server.role !== "database" || server.stage !== "source") {
+      throw new Error("業務更新のシミュレーションは現行DBサーバーでのみ実行できます。");
+    }
+    const oracleService = environment.services.find((service) => service.name.toLowerCase().startsWith("oracleservice"));
+    if (!oracleService || oracleService.status !== "running") {
+      notify("現行Oracleサービスが停止しているため、業務更新を記録できません。");
+      return;
+    }
+    const nextRevision = (environment.databaseRevision ?? 0) + 1;
+    setEnvironments((previous) => {
+      const current = previous[serverId];
+      if (!current) throw new Error(`Unknown database session: ${serverId}`);
+      return {
+        ...previous,
+        [serverId]: { ...current, databaseRevision: (current.databaseRevision ?? 0) + 1 },
+      };
+    });
+    recordAuditEvent("database:business-write");
+    notify(`現行DBに業務更新を記録しました。データ世代: ${nextRevision} (行データ自体はシミュレーションされません)`);
   };
 
   const addHypothesis = (event: React.FormEvent<HTMLFormElement>) => {
@@ -570,13 +631,29 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       ? activeObjective?.beginnerInstruction || "調査項目を確認しました。移行作業を続けてください。"
       : mode === "intermediate"
         ? "Windows Server 2016 から 2019 へ更改してください。構成図はありません。現行環境を調査して計画してください。"
-        : "切替後、ログインできません。";
+        : mode === "advanced"
+          ? "切替後、ログインできません。"
+          : scenario.incidents.find((incident) => incident.id === expertIncidentId)?.description ?? "業務システムで障害が発生しています。ログと構成から原因を特定してください。";
   const targetServer = targetApplication;
   const targetEnvironment = targetServer ? environments[targetServer.id] : undefined;
   const incidentCount = targetServer && targetEnvironment
     ? getEventLog(targetServer, scenario, targetEnvironment, environments, dns).length
     : 0;
-  const auditReport = calculateAuditReport(scenario, auditEvents, incidentCount, startedAt, Date.now(), projectWorkspace);
+  const databaseRevisions = sourceDatabase && targetDatabase
+    ? {
+      source: environments[sourceDatabase.id]?.databaseRevision ?? 0,
+      target: environments[targetDatabase.id]?.databaseRevision ?? 0,
+    }
+    : undefined;
+  const auditReport = calculateAuditReport(
+    scenario,
+    auditEvents,
+    incidentCount,
+    startedAt,
+    Date.now(),
+    projectWorkspace,
+    databaseRevisions,
+  );
 
   if (screen === "desktop") {
     return (
@@ -615,7 +692,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         </div>
         <div className="header-request">
           <span className="request-mark"><Activity size={14} /></span>
-          <span><small>{mode === "tutorial" ? "AI上司 / チュートリアル" : "作業依頼"}</small><strong>{mode === "advanced" ? "切替後、ログインできません" : "新環境へ移行し、切替後の稼働を確認してください"}</strong></span>
+          <span><small>{mode === "tutorial" ? "AI上司 / チュートリアル" : mode === "expert" ? "障害報告" : "作業依頼"}</small><strong>{mode === "expert" ? "発生した障害を調査し、原因を特定してください。" : mode === "advanced" ? "切替後、ログインできません" : "新環境へ移行し、切替後の稼働を確認してください"}</strong></span>
         </div>
         <div className="header-actions">
           <div className={`connection-indicator ${hasOpenIssues ? "attention" : ""}`}><i />{hasOpenIssues ? "要確認" : "接続中"}</div>
@@ -682,6 +759,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                 onExport={exportAsset}
                 onImport={importAsset}
                 onServiceToggle={toggleService}
+                onDatabaseWrite={recordBusinessWrite}
                 onDnsDraftChange={setDnsDraft}
                 onDnsApply={() => {
                   const nextDns = {
@@ -839,6 +917,7 @@ function DesktopHome({
     beginner: "達成する目的だけを表示します。調査方法は自分で考えます。",
     intermediate: "更改の目的だけを提示します。構成図やヒントはありません。",
     advanced: "障害の症状だけを提示します。ログと構成から原因を特定してください。",
+    expert: "移行済み環境に障害が1件発生します。事象だけが提示され、調査・復旧方法は案内されません。",
   };
   const cloudServers = scenario.assets.servers.filter((server) => server.role !== "dns");
 
@@ -871,7 +950,7 @@ function DesktopHome({
             <label className="desktop-setting-row"><span>案件</span><select value={scenario.id} onChange={(event) => onScenarioChange(event.target.value)}>{scenarios.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
             <label className="desktop-setting-row"><span>基盤</span><select value={provider} onChange={(event) => onProviderChange(event.target.value as DeploymentProvider)}><option value="onprem">オンプレミス</option><option value="aws">AWS</option><option value="azure">Azure</option></select></label>
             <label className="desktop-setting-row"><span>接続先</span><select value={serverId} onChange={(event) => onServerChange(event.target.value)}>{scenario.assets.servers.map((server) => <option value={server.id} key={server.id}>{server.hostname} — {server.role}</option>)}</select></label>
-            <label className="desktop-setting-row"><span>難易度</span><select value={mode} onChange={(event) => onModeChange(event.target.value as DifficultyMode)}><option value="tutorial">チュートリアル</option><option value="beginner">初級</option><option value="intermediate">中級</option><option value="advanced">上級</option></select></label>
+            <label className="desktop-setting-row"><span>難易度</span><select value={mode} onChange={(event) => onModeChange(event.target.value as DifficultyMode)}><option value="tutorial">チュートリアル</option><option value="beginner">初級</option><option value="intermediate">中級</option><option value="advanced">上級</option><option value="expert">エキスパート</option></select></label>
             <div className="mode-description"><strong>{modeLabel(mode)}</strong><span>{modeDescriptions[mode]}</span></div>
             <div className="selected-shortcut"><span className="shortcut-window-icon"><Terminal size={17} /></span><div><small>デスクトップ アプリ / 接続先</small><strong>{selectedLabel} → {scenario.assets.servers.find((server) => server.id === serverId)?.hostname}</strong></div><span className="rdp-target">{provider === "aws" ? "EC2 / RDP" : provider === "azure" ? "Azure VM / RDP" : "RDP / Windows Server"}</span></div>
             <div className="desktop-connect-actions">
@@ -1155,6 +1234,7 @@ function ServerSession({
   onExport,
   onImport,
   onServiceToggle,
+  onDatabaseWrite,
   onDnsDraftChange,
   onDnsApply,
   onJdbcChange,
@@ -1186,6 +1266,7 @@ function ServerSession({
   onExport: (serverId: string, kind: TransferPackage["kind"], content?: string) => void;
   onImport: (serverId: string) => void;
   onServiceToggle: (serverId: string, serviceId: string) => void;
+  onDatabaseWrite: (serverId: string) => void;
   onDnsDraftChange: (dns: DnsRuntime) => void;
   onDnsApply: () => void;
   onJdbcChange: (value: string) => void;
@@ -1196,6 +1277,8 @@ function ServerSession({
   onCloseApp: () => void;
 }) {
   const issueEvents = getEventLog(server, scenario, environment, environments, dns);
+  const sourceDatabase = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "source");
+  const sourceDatabaseRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onExecute(input);
@@ -1234,9 +1317,11 @@ function ServerSession({
             draft={draft}
             issues={issueEvents}
             taskRuns={taskRuns}
+            sourceDatabaseRevision={sourceDatabaseRevision}
             onExport={onExport}
             onImport={onImport}
             onServiceToggle={onServiceToggle}
+            onDatabaseWrite={onDatabaseWrite}
             onDnsDraftChange={onDnsDraftChange}
             onDnsApply={onDnsApply}
             onJdbcChange={onJdbcChange}
@@ -1274,9 +1359,11 @@ function ManagerWindow({
   draft,
   issues,
   taskRuns,
+  sourceDatabaseRevision,
   onExport,
   onImport,
   onServiceToggle,
+  onDatabaseWrite,
   onDnsDraftChange,
   onDnsApply,
   onJdbcChange,
@@ -1295,9 +1382,11 @@ function ManagerWindow({
   draft: string;
   issues: Array<{ source: string; type: "Error" | "Warning"; message: string }>;
   taskRuns: Record<string, string>;
+  sourceDatabaseRevision: number;
   onExport: (serverId: string, kind: TransferPackage["kind"], content?: string) => void;
   onImport: (serverId: string) => void;
   onServiceToggle: (serverId: string, serviceId: string) => void;
+  onDatabaseWrite: (serverId: string) => void;
   onDnsDraftChange: (dns: DnsRuntime) => void;
   onDnsApply: () => void;
   onJdbcChange: (value: string) => void;
@@ -1310,6 +1399,7 @@ function ManagerWindow({
   const dbSchemas = environment.databaseSchemas;
   const targetDatabase = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "target");
   const targetDatabaseInfo = scenario.assets.databases.find((item) => item.serverId === targetDatabase?.id);
+  const dataBehind = server.stage === "target" && sourceDatabaseRevision > (environment.databaseRevision ?? 0);
   const jdbcPlaceholder = targetDatabase
     ? `jdbc.url=jdbc:oracle:thin:@${targetDatabase.hostname}:${targetDatabaseInfo?.listenerPort ?? 1521}:${targetDatabaseInfo?.serviceName ?? "SERVICE"}`
     : "jdbc.url=jdbc:oracle:thin:@<DB_HOST>:1521:<SERVICE>";
@@ -1379,7 +1469,19 @@ function ManagerWindow({
         <div className="database-console"><span>SQL*Plus: Release {environment.databaseVersion ?? "未インストール"} - Production</span><span>Connected to:</span><strong>Oracle Database {environment.databaseVersion ?? "未インストール"}</strong><span>接続先: {server.hostname}</span></div>
         <div className="database-schema-title"><strong>ユーザースキーマ</strong><span>{dbSchemas.length} 件</span></div>
         {dbSchemas.length ? <div className="schema-list">{dbSchemas.map((schemaName) => <span key={schemaName}><Database size={13} />{schemaName}<i>VALID</i></span>)}</div> : <EmptyManager text="ユーザースキーマがありません。" />}
-        <div className="manager-bottom-actions"><span>Data Pump によるスキーマ移行</span><ManagerTransfer kind="database" source={dbSchemas.length > 0} canImport={canImport} onExport={() => onExport(server.id, "database")} onImport={() => onImport(server.id)} /></div>
+        <div className={`database-revision ${dataBehind ? "behind" : ""}`}>
+          <span>{server.stage === "source" ? "現行DBデータ世代" : "新DBデータ世代"}: {environment.databaseRevision ?? 0}</span>
+          {server.stage === "target" && <span>現行DB: {sourceDatabaseRevision} · {dataBehind ? "未同期の更新あり" : "同期済み"}</span>}
+        </div>
+        {server.role === "database" && server.stage === "source" && <button className="database-write-button" onClick={() => onDatabaseWrite(server.id)}>業務更新を1件発生させる</button>}
+        <div className="manager-bottom-actions"><span>Data Pump · データ世代を含むスナップショット</span><ManagerTransfer
+          kind="database"
+          source={dbSchemas.length > 0}
+          canImport={canImport}
+          importLabel={server.stage === "target" && transfer?.kind === "database" && transfer.revision === sourceDatabaseRevision && sourceDatabaseRevision > 0 ? "最終同期" : "インポート"}
+          onExport={() => onExport(server.id, "database")}
+          onImport={() => onImport(server.id)}
+        /></div>
       </ManagerFrame>}
     </div>
   );
@@ -1389,10 +1491,10 @@ function ManagerFrame({ title, icon, children }: { title: string; icon: React.Re
   return <div className="mmc-frame"><div className="mmc-frame-title">{icon}<strong>{title}</strong><span>▣</span></div><div className="mmc-content">{children}</div></div>;
 }
 
-function ManagerTransfer({ kind, source, canImport, onExport, onImport }: { kind: TransferPackage["kind"]; source: boolean; canImport: boolean | undefined; onExport: () => void; onImport: () => void }) {
+function ManagerTransfer({ kind, source, canImport, importLabel, onExport, onImport }: { kind: TransferPackage["kind"]; source: boolean; canImport: boolean | undefined; importLabel?: string; onExport: () => void; onImport: () => void }) {
   return <div className="manager-action-group">
     {source && <button className="manager-secondary-button" onClick={onExport}><ArrowUpFromLine size={13} />エクスポート</button>}
-    {canImport && <button className="manager-primary-button" onClick={onImport}><ArrowDownToLine size={13} />インポート</button>}
+    {canImport && <button className="manager-primary-button" onClick={onImport}><ArrowDownToLine size={13} />{importLabel ?? "インポート"}</button>}
     {!source && !canImport && <span className="manager-hint">{kind === "database" ? "移行データなし" : "移行元でエクスポートしてください"}</span>}
   </div>;
 }
@@ -1429,6 +1531,7 @@ function modeLabel(mode: DifficultyMode): string {
     beginner: "初級",
     intermediate: "中級",
     advanced: "上級",
+    expert: "エキスパート",
   };
   return labels[mode];
 }

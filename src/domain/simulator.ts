@@ -2,6 +2,7 @@ import type {
   CommandOutput,
   Database,
   DNS,
+  IncidentDefinition,
   ManagerApp,
   RuntimeEnvironment,
   RuntimeEnvironments,
@@ -60,9 +61,96 @@ export function createRuntimeEnvironments(scenario: Scenario): RuntimeEnvironmen
           : null,
         databaseVersion: scenario.assets.databases.find((database) => database.serverId === server.id)?.version ?? null,
         databaseSchemas: scenario.assets.databases.find((database) => database.serverId === server.id)?.schemas ?? [],
+        databaseRevision: 0,
       } satisfies RuntimeEnvironment,
     ]),
   );
+}
+
+export function chooseExpertIncident(scenario: Scenario, random: () => number = Math.random): IncidentDefinition {
+  const candidates = scenario.incidents.filter((incident) =>
+    ["service", "certificate", "jdbc", "task"].includes(incident.requiredAsset),
+  );
+  if (!candidates.length) throw new Error("エキスパートモード用の対応可能な障害が定義されていません。");
+  const value = random();
+  if (!Number.isFinite(value)) throw new Error("障害イベントの抽選値が不正です。");
+  const index = Math.min(candidates.length - 1, Math.max(0, Math.floor(value * candidates.length)));
+  return candidates[index];
+}
+
+export function createExpertRuntimeEnvironments(scenario: Scenario, incidentId: string): RuntimeEnvironments {
+  const incident = scenario.incidents.find((item) => item.id === incidentId
+    && ["service", "certificate", "jdbc", "task"].includes(item.requiredAsset));
+  if (!incident) throw new Error(`エキスパート障害が見つかりません: ${incidentId}`);
+
+  const environments = createRuntimeEnvironments(scenario);
+  const sourceApplication = scenario.assets.servers.find((server) => server.role === "application" && server.stage === "source");
+  const targetApplication = scenario.assets.servers.find((server) => server.role === "application" && server.stage === "target");
+  const sourceDatabase = scenario.assets.servers.find((server) => server.role === "database" && server.stage === "source");
+  const targetDatabase = scenario.assets.servers.find((server) => server.role === "database" && server.stage === "target");
+  if (!sourceApplication || !targetApplication || !sourceDatabase || !targetDatabase) {
+    throw new Error("エキスパートモードには新旧AP・DBサーバーが必要です。");
+  }
+  const sourceApplicationEnvironment = environments[sourceApplication.id];
+  const targetApplicationEnvironment = environments[targetApplication.id];
+  const sourceDatabaseEnvironment = environments[sourceDatabase.id];
+  const targetDatabaseEnvironment = environments[targetDatabase.id];
+  if (!sourceApplicationEnvironment || !targetApplicationEnvironment || !sourceDatabaseEnvironment || !targetDatabaseEnvironment) {
+    throw new Error("エキスパートモードのサーバー環境が正しく定義されていません。");
+  }
+
+  const migratedApplication: RuntimeEnvironment = {
+    ...targetApplicationEnvironment,
+    services: sourceApplicationEnvironment.services.map((service) => ({
+      ...service,
+      serverId: targetApplication.id,
+      status: "running",
+    })),
+    tasks: sourceApplicationEnvironment.tasks.map((task) => ({ ...task, serverId: targetApplication.id })),
+    certificates: sourceApplicationEnvironment.certificates.map((certificate) => ({
+      ...certificate,
+      serverId: targetApplication.id,
+    })),
+    configurationFiles: sourceApplicationEnvironment.configurationFiles.map((file) => ({
+      ...file,
+      serverId: targetApplication.id,
+      content: file.content
+        .replaceAll(sourceApplication.ipAddress, targetApplication.ipAddress)
+        .replaceAll(sourceDatabase.hostname, targetDatabase.hostname),
+    })),
+    jdbcProperties: sourceApplicationEnvironment.jdbcProperties?.replaceAll(sourceDatabase.hostname, targetDatabase.hostname) ?? null,
+  };
+  environments[targetApplication.id] = migratedApplication;
+  environments[targetDatabase.id] = {
+    ...targetDatabaseEnvironment,
+    databaseSchemas: [...sourceDatabaseEnvironment.databaseSchemas],
+    databaseRevision: sourceDatabaseEnvironment.databaseRevision,
+  };
+
+  if (incident.requiredAsset === "service") {
+    const resin = migratedApplication.services.find((service) => service.name.toLowerCase().includes("resin"));
+    if (!resin) throw new Error("選択されたサービス障害に対応するResinサービスがありません。");
+    environments[targetApplication.id] = {
+      ...migratedApplication,
+      services: migratedApplication.services.map((service) => service.id === resin.id ? { ...service, status: "stopped" } : service),
+    };
+  } else if (incident.requiredAsset === "certificate") {
+    const tlsCertificate = migratedApplication.certificates.find((certificate) =>
+      certificate.hasPrivateKey && certificate.subject.toLowerCase().includes(scenario.assets.dns[0]?.name.toLowerCase() ?? ""),
+    );
+    if (!tlsCertificate) throw new Error("選択された証明書障害に対応する秘密鍵付き証明書がありません。");
+    environments[targetApplication.id] = {
+      ...migratedApplication,
+      certificates: migratedApplication.certificates.filter((certificate) => certificate.id !== tlsCertificate.id),
+    };
+  } else if (incident.requiredAsset === "jdbc") {
+    if (!sourceApplicationEnvironment.jdbcProperties) throw new Error("選択されたJDBC障害に対応する現行設定がありません。");
+    environments[targetApplication.id] = { ...migratedApplication, jdbcProperties: sourceApplicationEnvironment.jdbcProperties };
+  } else {
+    if (!migratedApplication.tasks.length) throw new Error("選択されたタスク障害に対応する定期タスクがありません。");
+    environments[targetApplication.id] = { ...migratedApplication, tasks: [] };
+  }
+  return environments;
 }
 
 export function initialDnsRuntime(dns: DNS): DnsRuntime {
@@ -294,6 +382,18 @@ export function getEventLog(
       source: "intra-mart",
       type: "Error",
       message: jdbcIncident?.logs[0] ?? `JDBC connection failed${environment.jdbcProperties ? ` (${environment.jdbcProperties.match(/@([^/\n]+)/)?.[1] ?? "unknown"})` : " (jdbc.properties not found)"}.`,
+    });
+  }
+  const sourceRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;
+  const targetRevision = database ? environments[database.id]?.databaseRevision ?? 0 : 0;
+  if (database && sourceRevision > targetRevision) {
+    const dataIncident = scenario.incidents.find((item) => item.requiredAsset === "database-data");
+    events.push({
+      source: "Oracle Database",
+      type: "Error",
+      message: dataIncident?.logs[0]
+        ? `${dataIncident.logs[0]} (source=${sourceRevision}, target=${targetRevision})`
+        : `Database data is stale: source revision ${sourceRevision}, target revision ${targetRevision}.`,
     });
   }
 

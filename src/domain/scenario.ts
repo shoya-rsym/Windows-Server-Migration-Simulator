@@ -116,6 +116,7 @@ const scenarioSchema = z.object({
     beginner: z.array(z.string()),
     intermediate: z.array(z.string()),
     advanced: z.array(z.string()),
+    expert: z.array(z.string()),
   }),
   tutorialSteps: z.array(z.object({
     id: z.string().min(1),
@@ -157,6 +158,42 @@ const scenarioSchema = z.object({
 
   const auditIds = new Set(scenario.auditChecks.map((check) => check.id));
   const learningIds = new Set(scenario.learningObjectives.map((objective) => objective.id));
+  const sourceApplicationId = scenario.assets.servers.find((server) =>
+    server.role === "application" && server.stage === "source",
+  )?.id;
+  const sourceDatabaseId = scenario.assets.servers.find((server) =>
+    server.role === "database" && server.stage === "source",
+  )?.id;
+  const dnsName = scenario.assets.dns[0]?.name.toLowerCase() ?? "";
+  const expertIncidentCanBeInjected = scenario.incidents.some((incident) => {
+    if (incident.requiredAsset === "service") {
+      return scenario.assets.services.some((service) =>
+        service.serverId === sourceApplicationId && service.name.toLowerCase().includes("resin"),
+      );
+    }
+    if (incident.requiredAsset === "certificate") {
+      return scenario.assets.certificates.some((certificate) =>
+        certificate.serverId === sourceApplicationId
+        && certificate.hasPrivateKey
+        && certificate.subject.toLowerCase().includes(dnsName),
+      );
+    }
+    if (incident.requiredAsset === "jdbc") {
+      return Boolean(sourceApplicationId && sourceDatabaseId
+        && scenario.assets.databases.some((database) => database.serverId === sourceDatabaseId));
+    }
+    if (incident.requiredAsset === "task") {
+      return scenario.assets.tasks.some((task) => task.serverId === sourceApplicationId);
+    }
+    return false;
+  });
+  if (!expertIncidentCanBeInjected) {
+    context.addIssue({
+      code: "custom",
+      message: "エキスパートモード用に実際のシナリオ資産へ適用できるサービス・証明書・JDBC・タスク障害を定義してください。",
+      path: ["incidents"],
+    });
+  }
   const componentNames = new Set(scenario.project.components);
   const dependencyIds = new Set<string>();
   scenario.project.dependencies.forEach((dependency, index) => {

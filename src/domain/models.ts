@@ -1,6 +1,6 @@
 export type AssetRole = "application" | "database" | "dns";
 export type EnvironmentStage = "source" | "target" | "infrastructure";
-export type DifficultyMode = "tutorial" | "beginner" | "intermediate" | "advanced";
+export type DifficultyMode = "tutorial" | "beginner" | "intermediate" | "advanced" | "expert";
 export type DeploymentProvider = "onprem" | "aws" | "azure";
 
 export interface LearningObjective {
@@ -210,6 +210,7 @@ export interface RuntimeEnvironment {
   jdbcProperties: string | null;
   databaseVersion: string | null;
   databaseSchemas: string[];
+  databaseRevision: number;
 }
 
 export type RuntimeEnvironments = Record<string, RuntimeEnvironment>;
@@ -220,7 +221,7 @@ export type TransferPackage =
   | { kind: "certificates"; sourceServerId: string; items: Certificate[] }
   | { kind: "configFile"; sourceServerId: string; items: ConfigFile[] }
   | { kind: "jdbc"; sourceServerId: string; content: string }
-  | { kind: "database"; sourceServerId: string; schemas: string[] };
+  | { kind: "database"; sourceServerId: string; schemas: string[]; revision: number };
 
 export interface ConsoleEntry {
   id: number;

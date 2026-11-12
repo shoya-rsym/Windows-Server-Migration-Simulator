@@ -63,6 +63,7 @@ export function calculateAuditReport(
   startedAt: number,
   now = Date.now(),
   projectWorkspace?: ProjectWorkspace,
+  databaseRevisions?: { source: number; target: number },
 ): AuditReport {
   const checks = scenario.auditChecks.map((check) => ({
     check,
@@ -117,8 +118,9 @@ export function calculateAuditReport(
     rollbackPlan: "",
     cutoverDecision: "pending" as const,
   };
-  const projectScores = calculateProjectScores(scenario, events, incidentCount, successRate, project);
-  const projectFindings = getProjectFindings(scenario, events, project);
+  const dataSyncPending = Boolean(databaseRevisions && databaseRevisions.source > databaseRevisions.target);
+  const projectScores = calculateProjectScores(scenario, events, incidentCount, successRate, project, dataSyncPending);
+  const projectFindings = getProjectFindings(scenario, events, project, dataSyncPending);
   const averageScore = Math.round(projectScores.reduce((total, item) => total + item.score, 0) / projectScores.length);
   const overallGrade = gradeFor(averageScore);
   const review = buildReview(successRate, ttlMissed, missingTitles, orderWarnings, incidentCount, overallGrade, projectFindings);
@@ -144,6 +146,7 @@ function calculateProjectScores(
   incidentCount: number,
   migrationRate: number,
   project: ProjectWorkspace,
+  dataSyncPending: boolean,
 ): AuditReport["projectScores"] {
   const eventNames = new Set(events.map((event) => event.name));
   const investigationEvents = events.filter((event) => event.name.startsWith("inspect:") || event.name.startsWith("investigate:"));
@@ -181,7 +184,7 @@ function calculateProjectScores(
   return [
     { id: "research", label: "調査品質", score: researchScore },
     { id: "design", label: "設計品質", score: designScore },
-    { id: "migration", label: "移行品質", score: migrationRate },
+    { id: "migration", label: "移行品質", score: Math.max(0, migrationRate - (dataSyncPending ? 20 : 0)) },
     { id: "incident", label: "障害対応", score: incidentResponseScore },
     { id: "security", label: "セキュリティ", score: securityScore },
     { id: "operations", label: "運用品質", score: operationsScore },
@@ -192,6 +195,7 @@ function getProjectFindings(
   scenario: Scenario,
   events: AuditEvent[],
   project: ProjectWorkspace,
+  dataSyncPending: boolean,
 ): AuditReport["projectFindings"] {
   const findings: AuditReport["projectFindings"] = [];
   const capturedNotes = project.investigationNotes.filter((note) => note.title.trim() && note.detail.trim());
@@ -217,6 +221,13 @@ function getProjectFindings(
       id: "downtime",
       title: "計画停止時間が案件の許容時間を超えています",
       remediation: `停止計画を${scenario.project.downtimeLimitMinutes}分以内に見直し、データ移行と確認に必要な時間を再見積もりしてください。`,
+    });
+  }
+  if (dataSyncPending) {
+    findings.push({
+      id: "database-final-sync",
+      title: "現行DBに新DBへ未反映の業務更新があります",
+      remediation: "切替前に現行DBを再エクスポートし、新DBへインポートしてください。画面のデータ世代が一致したことを確認してからGo判定します。",
     });
   }
   if (project.ttlLeadDays < 3) {

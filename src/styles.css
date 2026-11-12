@@ -209,6 +209,7 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .schema-list { display: flex; flex-direction: column; gap: 5px; }
 .schema-list span { display: flex; align-items: center; gap: 7px; padding: 7px; color: #5a6d83; border: 1px solid #e4e9ef; border-radius: 4px; background: white; font-size: 10.0px; }
 .schema-list svg { color: #7394bd; }.schema-list i { margin-left: auto; color: #599777; font-size: 7.5px; font-style: normal; }
+.database-revision { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; padding: 7px 8px; color: #73849a; border: 1px solid #e4e9ef; border-radius: 4px; background: #f9fbfd; font-size: 8.8px; }.database-revision.behind { color: #a96845; border-color: #f0dfcf; background: #fff9f3; }.database-write-button { margin-top: 7px; padding: 6px 8px; color: #526d8c; border: 1px solid #dce5ef; border-radius: 4px; background: white; font-size: 8.8px; }.database-write-button:hover { color: #356cae; background: #f5f9fe; }
 .explorer-address { padding: 7px; color: #718198; border: 1px solid #dfe5ec; background: white; font-size: 10.0px; }.explorer-file-list { display: grid; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 5px; margin-top: 9px; }.explorer-file-list span { display: flex; align-items: center; gap: 7px; min-height: 31px; padding: 6px; color: #5b6d84; border: 1px solid #e3e8ef; border-radius: 3px; background: white; font-size: 10.0px; }.explorer-file-list svg { color: #7195c2; }
 
 .windows-desktop { min-height: 100vh; color: #f7fbff; background: #0a6fa7; }

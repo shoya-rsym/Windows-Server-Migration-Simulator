@@ -67,7 +67,8 @@
     { "id": "https-certificate", "title": "HTTPS証明書エラー", "description": "利用者のブラウザーに証明書警告が表示されます。", "cause": "秘密鍵を含むSSL証明書が新APサーバーに移行されていません。", "requiredAsset": "certificate", "logs": ["[ERROR] SSL: private key not found for intra.example.local", "[WARN] HTTPS listener failed to initialize"], "repairAction": "certificate", "repairLabel": "秘密鍵を含む証明書をインポートする" },
     { "id": "jdbc-connection", "title": "DB接続エラー", "description": "アプリケーションがデータベースへ接続できません。", "cause": "JDBC接続先が旧DBサーバーのままです。", "requiredAsset": "jdbc", "logs": ["[ERROR] JDBC-1001: Connection refused", "[INFO] URL=jdbc:oracle:thin:@DBSV01:1521:ORCL"], "repairAction": "jdbc", "repairLabel": "JDBC接続先を新DBに変更する" },
     { "id": "batch-task", "title": "定期Excel出力停止", "description": "深夜のExcel出力バッチが実行されていません。", "cause": "タスクスケジューラのDailyExcelExportが新APサーバーに移行されていません。", "requiredAsset": "task", "logs": ["[ERROR] Scheduled task DailyExcelExport was not found", "[WARN] Last successful run: yesterday 02:00"], "repairAction": "task", "repairLabel": "タスクスケジューラ設定を移行する" },
-    { "id": "resin-service", "title": "APサービス起動失敗", "description": "DNS切替後、アプリケーションにアクセスできません。", "cause": "Resin Windowsサービスの起動設定が未確認です。", "requiredAsset": "service", "logs": ["[ERROR] Service Resin is stopped", "[INFO] Startup type: Manual"], "repairAction": "service", "repairLabel": "Resinサービスを自動起動に設定する" }
+    { "id": "resin-service", "title": "APサービス起動失敗", "description": "DNS切替後、アプリケーションにアクセスできません。", "cause": "Resin Windowsサービスの起動設定が未確認です。", "requiredAsset": "service", "logs": ["[ERROR] Service Resin is stopped", "[INFO] Startup type: Manual"], "repairAction": "service", "repairLabel": "Resinサービスを自動起動に設定する" },
+    { "id": "database-data-stale", "title": "切替後の更新データ不足", "description": "切替後、直近に登録された業務データが新環境にありません。", "cause": "初期移行後に現行DBへ登録された更新が新DBへ同期されていません。", "requiredAsset": "database-data", "logs": ["[ERROR] DATA-1002: target database is behind the source data revision", "[INFO] Export the latest source revision and apply it to the target database"], "repairAction": "database", "repairLabel": "現行DBの最新状態をエクスポートし、新DBへ最終同期する" }
   ],
   "learningObjectives": [
     { "id": "systeminfo", "title": "Windows ServerのOS情報を確認する", "serverRole": "application", "commands": ["systeminfo"], "tutorialInstruction": "接続中のcmdで systeminfo を実行し、ホスト名とOSバージョンを調べてください。", "beginnerInstruction": "OSとホスト名を確認してください。", "explanation": "OSの世代やホスト名は、互換性・移行計画・接続先の特定に必要です。新旧サーバーで比較して記録します。" },
@@ -79,7 +80,8 @@
     "tutorial": ["systeminfo", "hostname", "java-version", "oracle-version"],
     "beginner": ["java-version", "oracle-version", "systeminfo", "hostname"],
     "intermediate": [],
-    "advanced": []
+    "advanced": [],
+    "expert": []
   },
   "tutorialSteps": [
     { "id": "inspect-os", "instruction": "APSV01 の CMD で systeminfo を実行し、Windows Server のバージョンを確認してください。左ペインの接続先が APSV01 であることも確認します。", "requiredEvents": ["inspect:os:source"], "explanation": "OSの世代は、移行先の互換性や必要なテストを決める基礎情報です。" },
