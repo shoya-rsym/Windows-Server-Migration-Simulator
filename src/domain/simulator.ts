@@ -164,6 +164,7 @@ export function runCommand(
   environment: RuntimeEnvironment,
   environments: RuntimeEnvironments,
   dns: DnsRuntime,
+  allowedInboundPorts?: number[],
 ): ShellResult {
   const command = rawCommand.trim();
   const normalized = command.toLowerCase().replace(/\s+/g, " ");
@@ -220,7 +221,10 @@ export function runCommand(
     if (!target || port !== 8080) {
       return { output: ["HTTP/1.1 503 Service Unavailable", "接続先またはポートを確認してください。"] };
     }
-    const issues = applicationHealthIssues(target, scenario, environments);
+    if (allowedInboundPorts && !allowedInboundPorts.includes(port)) {
+      return { output: ["HTTP/1.1 503 Service Unavailable", "原因: Security Group が TCP 8080 を遮断しています。"] };
+    }
+    const issues = applicationHealthIssues(target, scenario, environments, allowedInboundPorts);
     return issues.length
       ? { output: ["HTTP/1.1 503 Service Unavailable", ...issues.map((issue) => `原因: ${issue}`)] }
       : { output: ["HTTP/1.1 200 OK", `接続先: ${target.hostname}:${port}`, "intra-mart login page"] };
@@ -288,6 +292,7 @@ function applicationHealthIssues(
   application: Server,
   scenario: Scenario,
   environments: RuntimeEnvironments,
+  allowedInboundPorts?: number[],
 ): string[] {
   const environment = environments[application.id];
   if (!environment) return ["アプリケーション環境が見つかりません。"];
@@ -323,6 +328,9 @@ function applicationHealthIssues(
     if (requiredSchema && !databaseEnvironment.databaseSchemas.includes(requiredSchema)) {
       issues.push(`DBに ${requiredSchema} スキーマがありません。`);
     }
+    if (allowedInboundPorts && !allowedInboundPorts.includes(databaseConfig.listenerPort)) {
+      issues.push(`Security Group が TCP ${databaseConfig.listenerPort} を遮断しています。`);
+    }
   }
   return issues;
 }
@@ -333,10 +341,18 @@ export function getEventLog(
   environment: RuntimeEnvironment,
   environments: RuntimeEnvironments,
   dns: DnsRuntime,
+  allowedInboundPorts?: number[],
 ): Array<{ source: string; type: "Error" | "Warning"; message: string }> {
   if (server.role !== "application" || server.stage !== "target" || dns.address !== server.ipAddress) return [];
 
   const events: Array<{ source: string; type: "Error" | "Warning"; message: string }> = [];
+  if (allowedInboundPorts && !allowedInboundPorts.includes(8080)) {
+    events.push({
+      source: "AWS Security Group",
+      type: "Error",
+      message: "インバウンドルールにTCP 8080がなく、利用者からAPへ接続できません。",
+    });
+  }
   const dnsName = scenario.assets.dns[0]?.name ?? "application";
   const sourceApplication = scenario.assets.servers.find((item) => item.role === "application" && item.stage === "source");
   const serviceIncident = scenario.incidents.find((item) => item.requiredAsset === "service");
@@ -368,6 +384,13 @@ export function getEventLog(
   const database = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "target");
   const sourceDatabase = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "source");
   const targetDatabaseInfo = database && scenario.assets.databases.find((item) => item.serverId === database.id);
+  if (targetDatabaseInfo && allowedInboundPorts && !allowedInboundPorts.includes(targetDatabaseInfo.listenerPort)) {
+    events.push({
+      source: "AWS Security Group",
+      type: "Error",
+      message: `インバウンドルールにTCP ${targetDatabaseInfo.listenerPort}がなく、APからOracle Listenerへ接続できません。`,
+    });
+  }
   const requiredSchema = sourceDatabase
     ? scenario.assets.databases.find((item) => item.serverId === sourceDatabase.id)?.schemas[0]
     : undefined;

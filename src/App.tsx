@@ -32,6 +32,7 @@ import {
   Terminal,
   X,
 } from "lucide-react";
+import { AwsConsole } from "./components/AwsConsole";
 import {
   createRuntimeEnvironments,
   createExpertRuntimeEnvironments,
@@ -42,8 +43,10 @@ import {
   runCommand,
   type DnsRuntime,
 } from "./domain/simulator";
+import { createInitialCloudWorkspace } from "./domain/cloud";
 import type {
   Certificate,
+  CloudWorkspace,
   ConsoleEntry,
   DeploymentProvider,
   DifficultyMode,
@@ -97,6 +100,7 @@ interface SimulationSave {
   entryId: number;
   projectWorkspace?: ProjectWorkspace;
   expertIncidentId?: string | null;
+  cloudWorkspace?: CloudWorkspace;
 }
 
 function isSimulationSave(value: unknown): value is SimulationSave {
@@ -127,6 +131,17 @@ function isSimulationSave(value: unknown): value is SimulationSave {
       && typeof workspace.rollbackPlan === "string"
       && ["pending", "go", "no-go", "rollback", "continue"].includes(String(workspace.cutoverDecision));
   };
+  const isCloudWorkspace = (item: unknown) => {
+    if (item === undefined) return true;
+    if (!isRecord(item)) return false;
+    const workspace = item as Record<string, unknown>;
+    return (workspace.vpcCidr === null || typeof workspace.vpcCidr === "string")
+      && (workspace.subnetCidr === null || typeof workspace.subnetCidr === "string")
+      && typeof workspace.securityGroupCreated === "boolean"
+      && Array.isArray(workspace.securityGroupPorts)
+      && workspace.securityGroupPorts.every((port) => Number.isInteger(port) && Number(port) >= 1 && Number(port) <= 65535)
+      && isStringArray(workspace.instanceServerIds);
+  };
   return record.version === 2
     && ["tutorial", "beginner", "intermediate", "advanced", "expert"].includes(String(record.mode))
     && ["onprem", "aws", "azure"].includes(String(record.provider))
@@ -142,6 +157,7 @@ function isSimulationSave(value: unknown): value is SimulationSave {
     && Array.isArray(record.knowledgeRecords) && Array.isArray(record.auditEvents)
     && isProjectWorkspace(record.projectWorkspace)
     && (record.expertIncidentId === undefined || record.expertIncidentId === null || typeof record.expertIncidentId === "string")
+    && isCloudWorkspace(record.cloudWorkspace)
     && typeof record.startedAt === "number" && typeof record.entryId === "number";
 }
 
@@ -170,6 +186,26 @@ function jdbcDraftKey(serverId: string): string {
 
 function resinConfigDraftKey(serverId: string): string {
   return `resinConfig:${serverId}`;
+}
+
+function getAvailableServers(scenario: Scenario, provider: DeploymentProvider, workspace: CloudWorkspace): Server[] {
+  return scenario.assets.servers.filter((server) =>
+    provider !== "aws"
+    || server.stage !== "target"
+    || (workspace.instanceServerIds.includes(server.id) && workspace.securityGroupPorts.includes(3389)),
+  );
+}
+
+function createLegacyAwsWorkspace(scenario: Scenario): CloudWorkspace {
+  const targetServers = scenario.assets.servers.filter((server) => server.stage === "target");
+  const firstIp = targetServers[0]?.ipAddress.split(".") ?? ["10", "10", "2", "0"];
+  return {
+    vpcCidr: `${firstIp[0]}.${firstIp[1]}.0.0/16`,
+    subnetCidr: `${firstIp[0]}.${firstIp[1]}.${firstIp[2]}.0/24`,
+    securityGroupCreated: true,
+    securityGroupPorts: [3389, 8080, 1521],
+    instanceServerIds: targetServers.map((server) => server.id),
+  };
 }
 
 function App() {
@@ -202,6 +238,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const [sessionStarted, setSessionStarted] = useState(false);
   const [mode, setMode] = useState<DifficultyMode>("tutorial");
   const [provider, setProvider] = useState<DeploymentProvider>("onprem");
+  const [cloudWorkspace, setCloudWorkspace] = useState<CloudWorkspace>(() => createInitialCloudWorkspace());
   const [desktopShortcut, setDesktopShortcut] = useState<DesktopShortcut>("cmd");
   const [desktopServerId, setDesktopServerId] = useState(initialPanes[0]);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
@@ -256,6 +293,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       entryId,
       projectWorkspace,
       expertIncidentId,
+      cloudWorkspace,
     };
     try {
       window.localStorage.setItem(saveKey, JSON.stringify(snapshot));
@@ -268,6 +306,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     sessionStarted, mode, provider, paneServerIds, environments, dns, dnsDraft, history, inputs,
     activeApps, shellModes, transfer, hypotheses, drafts, taskRuns, completedObjectives, knowledgeRecords,
     auditEvents, startedAt, entryId, projectWorkspace, expertIncidentId,
+    cloudWorkspace,
   ]);
 
   const recordAuditEvent = (name: string) => {
@@ -285,9 +324,15 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     } catch (error) {
       setStorageError(error instanceof Error ? error.message : "保存データを削除できませんでした。");
     }
-    const serverId = desktopServerId;
+    const availableServers = getAvailableServers(scenario, provider, cloudWorkspace);
+    const serverId = availableServers.some((server) => server.id === desktopServerId)
+      ? desktopServerId
+      : availableServers[0]?.id ?? initialPanes[0];
+    const secondServerId = availableServers.some((server) => server.id === initialPanes[1])
+      ? initialPanes[1]
+      : serverId;
     const isManager = isManagerShortcut(desktopShortcut);
-    setPaneServerIds([serverId, initialPanes[1]]);
+    setPaneServerIds([serverId, secondServerId]);
     const expertIncident = mode === "expert" ? chooseExpertIncident(scenario) : null;
     setExpertIncidentId(expertIncident?.id ?? null);
     setEnvironments(expertIncident
@@ -326,6 +371,8 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     if (!storedSave) return;
     setMode(storedSave.mode);
     setProvider(storedSave.provider);
+    setCloudWorkspace(storedSave.cloudWorkspace
+      ?? (storedSave.provider === "aws" ? createLegacyAwsWorkspace(scenario) : createInitialCloudWorkspace()));
     setPaneServerIds(storedSave.paneServerIds);
     setEnvironments(Object.fromEntries(Object.entries(storedSave.environments).map(([serverId, environment]) => [
       serverId,
@@ -408,7 +455,15 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     const server = scenario.assets.servers.find((item) => item.id === serverId);
     const environment = environments[serverId];
     if (!server || !environment) throw new Error(`Unknown server session: ${serverId}`);
-    const result = runCommand(rawCommand, server, scenario, environment, environments, dns);
+    const result = runCommand(
+      rawCommand,
+      server,
+      scenario,
+      environment,
+      environments,
+      dns,
+      provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
+    );
     const normalized = rawCommand.trim().toLowerCase().replace(/\s+/g, " ");
 
     if (result.clear) {
@@ -620,7 +675,14 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
 
   const hasOpenIssues = scenario.assets.servers.some((server) => {
     const environment = environments[server.id];
-    return environment && getEventLog(server, scenario, environment, environments, dns).length > 0;
+    return environment && getEventLog(
+      server,
+      scenario,
+      environment,
+      environments,
+      dns,
+      provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
+    ).length > 0;
   });
 
   const activeObjective = getModeObjective(mode, scenario.learningObjectives, completedObjectives, scenario.learningOrderByMode);
@@ -637,7 +699,14 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const targetServer = targetApplication;
   const targetEnvironment = targetServer ? environments[targetServer.id] : undefined;
   const incidentCount = targetServer && targetEnvironment
-    ? getEventLog(targetServer, scenario, targetEnvironment, environments, dns).length
+    ? getEventLog(
+      targetServer,
+      scenario,
+      targetEnvironment,
+      environments,
+      dns,
+      provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
+    ).length
     : 0;
   const databaseRevisions = sourceDatabase && targetDatabase
     ? {
@@ -654,6 +723,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     projectWorkspace,
     databaseRevisions,
   );
+  const availableServers = getAvailableServers(scenario, provider, cloudWorkspace);
 
   if (screen === "desktop") {
     return (
@@ -662,13 +732,21 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         provider={provider}
         shortcut={desktopShortcut}
         serverId={desktopServerId}
+        availableServers={availableServers}
         saved={storedSave}
+        cloudWorkspace={cloudWorkspace}
         storageError={storageError}
         scenario={scenario}
         scenarios={scenarios}
         onScenarioChange={onScenarioChange}
         onModeChange={setMode}
-        onProviderChange={setProvider}
+        onProviderChange={(nextProvider) => {
+          setProvider(nextProvider);
+          if (!getAvailableServers(scenario, nextProvider, cloudWorkspace).some((server) => server.id === desktopServerId)) {
+            setDesktopServerId(sourceApplication?.id ?? initialPanes[0]);
+          }
+        }}
+        onCloudWorkspaceChange={setCloudWorkspace}
         onShortcutChange={(shortcut) => {
           setDesktopShortcut(shortcut);
           if (shortcut === "dns" && dnsServer) setDesktopServerId(dnsServer.id);
@@ -737,10 +815,11 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                 key={`${index}-${server.id}`}
                 slot={index === 0 ? "A" : "B"}
                 server={server}
-                servers={scenario.assets.servers}
+                servers={availableServers}
                 environment={environment}
                 environments={environments}
                 dns={dns}
+                allowedInboundPorts={provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined}
                 dnsDraft={dnsDraft}
                 scenario={scenario}
                 history={history[serverId] ?? []}
@@ -869,12 +948,15 @@ function DesktopHome({
   provider,
   shortcut,
   serverId,
+  availableServers,
   saved,
+  cloudWorkspace,
   storageError,
   scenario,
   scenarios,
   onModeChange,
   onProviderChange,
+  onCloudWorkspaceChange,
   onShortcutChange,
   onServerChange,
   onScenarioChange,
@@ -886,12 +968,15 @@ function DesktopHome({
   provider: DeploymentProvider;
   shortcut: DesktopShortcut;
   serverId: string;
+  availableServers: Server[];
   saved: SimulationSave | null;
+  cloudWorkspace: CloudWorkspace;
   storageError: string | null;
   scenario: Scenario;
   scenarios: Scenario[];
   onModeChange: (mode: DifficultyMode) => void;
   onProviderChange: (provider: DeploymentProvider) => void;
+  onCloudWorkspaceChange: (workspace: CloudWorkspace) => void;
   onShortcutChange: (shortcut: DesktopShortcut) => void;
   onServerChange: (serverId: string) => void;
   onScenarioChange: (scenarioId: string) => void;
@@ -919,7 +1004,7 @@ function DesktopHome({
     advanced: "障害の症状だけを提示します。ログと構成から原因を特定してください。",
     expert: "移行済み環境に障害が1件発生します。事象だけが提示され、調査・復旧方法は案内されません。",
   };
-  const cloudServers = scenario.assets.servers.filter((server) => server.role !== "dns");
+  const selectedServer = availableServers.find((server) => server.id === serverId);
 
   return (
     <main className="windows-desktop">
@@ -933,13 +1018,22 @@ function DesktopHome({
           <button className="desktop-icon recycle-icon" onClick={() => onShortcutChange("explorer")}><span>♲</span><small>ごみ箱</small></button>
         </div>
 
-        {provider !== "onprem" && (
-          <section className={`cloud-console ${provider}`}>
-            <div className="cloud-console-top"><Cloud size={17} /><strong>{provider === "aws" ? "AWS Management Console" : "Microsoft Azure"}</strong><span>アカウント: training-lab</span></div>
-            <div className="cloud-console-title"><small>{provider === "aws" ? "EC2 / Instances" : "Virtual machines"}</small><strong>{provider === "aws" ? "インスタンス" : "仮想マシン"}</strong></div>
-            <div className="cloud-resource-list">{cloudServers.map((server) => (
-              <div className="cloud-resource" key={server.id}><span className="cloud-running-dot" /><strong>{provider === "aws" ? (server.role === "database" ? (server.stage === "source" ? "DB-SVR01" : "DB-SVR02") : (server.stage === "source" ? "AP-SVR01" : "AP-SVR02")) : server.hostname}</strong><small>{server.operatingSystem}</small><span>{server.ipAddress}</span><button onClick={() => { onServerChange(server.id); onShortcutChange("cmd"); }}>RDP</button></div>
-            ))}</div>
+        {provider === "aws" && <AwsConsole
+          servers={scenario.assets.servers}
+          workspace={cloudWorkspace}
+          onChange={onCloudWorkspaceChange}
+          onConnect={(targetId) => { onServerChange(targetId); onShortcutChange("cmd"); }}
+        />}
+        {provider === "azure" && (
+          <section className="cloud-console azure">
+            <div className="cloud-console-top"><Cloud size={17} /><strong>Microsoft Azure</strong><span>training-lab</span></div>
+            <div className="cloud-console-title"><small>Virtual machines</small><strong>仮想マシン</strong></div>
+            {scenario.assets.servers.filter((server) => server.role !== "dns").map((server) => (
+              <div className="cloud-resource" key={server.id}>
+                <span className="cloud-running-dot" /><strong>{server.hostname}</strong><small>{server.operatingSystem}</small><span>{server.ipAddress}</span>
+                <button onClick={() => { onServerChange(server.id); onShortcutChange("cmd"); }}>RDP</button>
+              </div>
+            ))}
           </section>
         )}
 
@@ -949,10 +1043,10 @@ function DesktopHome({
             <div className="desktop-connect-heading"><div className="desktop-logo"><Monitor size={24} /></div><div><h1>リモート デスクトップ接続</h1><p>調査から切替・障害対応までをサーバー操作で体験します。</p></div></div>
             <label className="desktop-setting-row"><span>案件</span><select value={scenario.id} onChange={(event) => onScenarioChange(event.target.value)}>{scenarios.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
             <label className="desktop-setting-row"><span>基盤</span><select value={provider} onChange={(event) => onProviderChange(event.target.value as DeploymentProvider)}><option value="onprem">オンプレミス</option><option value="aws">AWS</option><option value="azure">Azure</option></select></label>
-            <label className="desktop-setting-row"><span>接続先</span><select value={serverId} onChange={(event) => onServerChange(event.target.value)}>{scenario.assets.servers.map((server) => <option value={server.id} key={server.id}>{server.hostname} — {server.role}</option>)}</select></label>
+            <label className="desktop-setting-row"><span>接続先</span><select value={selectedServer?.id ?? availableServers[0]?.id ?? ""} onChange={(event) => onServerChange(event.target.value)}>{availableServers.map((server) => <option value={server.id} key={server.id}>{server.hostname} — {server.role}</option>)}</select></label>
             <label className="desktop-setting-row"><span>難易度</span><select value={mode} onChange={(event) => onModeChange(event.target.value as DifficultyMode)}><option value="tutorial">チュートリアル</option><option value="beginner">初級</option><option value="intermediate">中級</option><option value="advanced">上級</option><option value="expert">エキスパート</option></select></label>
             <div className="mode-description"><strong>{modeLabel(mode)}</strong><span>{modeDescriptions[mode]}</span></div>
-            <div className="selected-shortcut"><span className="shortcut-window-icon"><Terminal size={17} /></span><div><small>デスクトップ アプリ / 接続先</small><strong>{selectedLabel} → {scenario.assets.servers.find((server) => server.id === serverId)?.hostname}</strong></div><span className="rdp-target">{provider === "aws" ? "EC2 / RDP" : provider === "azure" ? "Azure VM / RDP" : "RDP / Windows Server"}</span></div>
+            <div className="selected-shortcut"><span className="shortcut-window-icon"><Terminal size={17} /></span><div><small>デスクトップ アプリ / 接続先</small><strong>{selectedLabel} → {selectedServer?.hostname ?? availableServers[0]?.hostname}</strong></div><span className="rdp-target">{provider === "aws" ? "EC2 / RDP" : provider === "azure" ? "Azure VM / RDP" : "RDP / Windows Server"}</span></div>
             <div className="desktop-connect-actions">
               {saved && <button className="desktop-continue" onClick={onContinue}><Play size={14} />続きから始める</button>}
               <button className="desktop-start" onClick={onStart}><ArrowRight size={15} />{saved ? "最初から開始" : "RDP接続して開始"}</button>
@@ -1218,6 +1312,7 @@ function ServerSession({
   environment,
   environments,
   dns,
+  allowedInboundPorts,
   dnsDraft,
   scenario,
   history,
@@ -1250,6 +1345,7 @@ function ServerSession({
   environment: RuntimeEnvironment;
   environments: RuntimeEnvironments;
   dns: DnsRuntime;
+  allowedInboundPorts?: number[];
   dnsDraft: DnsRuntime;
   scenario: Scenario;
   history: ConsoleEntry[];
@@ -1276,7 +1372,7 @@ function ServerSession({
   onNotify: (message: string) => void;
   onCloseApp: () => void;
 }) {
-  const issueEvents = getEventLog(server, scenario, environment, environments, dns);
+  const issueEvents = getEventLog(server, scenario, environment, environments, dns, allowedInboundPorts);
   const sourceDatabase = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "source");
   const sourceDatabaseRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {

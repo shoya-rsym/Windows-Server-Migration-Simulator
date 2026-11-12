@@ -63,6 +63,14 @@ export interface ProjectWorkspace {
   cutoverDecision: CutoverDecision;
 }
 
+export interface CloudWorkspace {
+  vpcCidr: string | null;
+  subnetCidr: string | null;
+  securityGroupCreated: boolean;
+  securityGroupPorts: number[];
+  instanceServerIds: string[];
+}
+
 export interface TutorialStep {
   id: string;
   instruction: string;
