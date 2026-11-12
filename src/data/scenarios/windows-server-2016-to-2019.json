@@ -2,6 +2,19 @@
   "id": "windows-server-2016-to-2019",
   "title": "基幹業務システム サーバー更改",
   "description": "稼働中の業務システムを新しいサーバー環境へ移行し、本番切替後もサービスを継続する。",
+  "project": {
+    "users": 1200,
+    "downtimeLimitMinutes": 120,
+    "downtimeWindow": "22:00-24:00",
+    "criticality": "High",
+    "components": ["利用者", "AD認証", "DNS", "APサーバ", "Oracle DB", "定期バッチ"],
+    "dependencies": [
+      { "id": "ad-ap", "from": "AD認証", "to": "APサーバ", "reason": "利用者のログイン認証に使用" },
+      { "id": "dns-ap", "from": "DNS", "to": "APサーバ", "reason": "業務FQDNをAPサーバへ名前解決" },
+      { "id": "ap-db", "from": "APサーバ", "to": "Oracle DB", "reason": "アプリケーションの業務データ接続先" },
+      { "id": "batch-db", "from": "定期バッチ", "to": "Oracle DB", "reason": "夜間バッチがDBを利用" }
+    ]
+  },
   "assets": {
     "servers": [
       { "id": "ap-old", "hostname": "APSV01", "role": "application", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },

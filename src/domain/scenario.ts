@@ -5,6 +5,19 @@ const scenarioSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().min(1),
+  project: z.object({
+    users: z.number().int().positive(),
+    downtimeLimitMinutes: z.number().positive(),
+    downtimeWindow: z.string().min(1),
+    criticality: z.enum(["High", "Medium", "Low"]),
+    components: z.array(z.string().min(1)).min(1),
+    dependencies: z.array(z.object({
+      id: z.string().min(1),
+      from: z.string().min(1),
+      to: z.string().min(1),
+      reason: z.string().min(1),
+    })),
+  }),
   assets: z.object({
     servers: z.array(z.object({
       id: z.string(),
@@ -144,6 +157,25 @@ const scenarioSchema = z.object({
 
   const auditIds = new Set(scenario.auditChecks.map((check) => check.id));
   const learningIds = new Set(scenario.learningObjectives.map((objective) => objective.id));
+  const componentNames = new Set(scenario.project.components);
+  const dependencyIds = new Set<string>();
+  scenario.project.dependencies.forEach((dependency, index) => {
+    if (dependencyIds.has(dependency.id)) {
+      context.addIssue({
+        code: "custom",
+        message: `依存関係IDが重複しています: ${dependency.id}`,
+        path: ["project", "dependencies", index, "id"],
+      });
+    }
+    dependencyIds.add(dependency.id);
+    if (!componentNames.has(dependency.from) || !componentNames.has(dependency.to)) {
+      context.addIssue({
+        code: "custom",
+        message: "依存関係の接続元・接続先はcomponentsに定義してください。",
+        path: ["project", "dependencies", index],
+      });
+    }
+  });
   scenario.auditChecks.forEach((check, index) => {
     if (check.operationGuidance.length !== check.requiredEvents.length) {
       context.addIssue({

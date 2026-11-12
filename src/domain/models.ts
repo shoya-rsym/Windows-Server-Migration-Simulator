@@ -23,6 +23,46 @@ export interface AuditCheck {
   weight: number;
 }
 
+export interface ProjectDependency {
+  id: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+export interface ProjectBrief {
+  users: number;
+  downtimeLimitMinutes: number;
+  downtimeWindow: string;
+  criticality: "High" | "Medium" | "Low";
+  components: string[];
+  dependencies: ProjectDependency[];
+}
+
+export interface InvestigationNote {
+  id: string;
+  title: string;
+  detail: string;
+  createdAt: number;
+}
+
+export type CutoverDecision = "pending" | "go" | "no-go" | "rollback" | "continue";
+
+export interface ProjectWorkspace {
+  investigationNotes: InvestigationNote[];
+  architectureEdges: Array<{ id: string; from: string; to: string }>;
+  plannedDowntimeMinutes: number;
+  maintenanceWindow: string;
+  ttlLeadDays: number;
+  noticeLeadDays: number;
+  noticeSubject: string;
+  noticeBody: string;
+  noticeSent: boolean;
+  migrationStrategy: "expdp" | "rman" | "dataguard";
+  rollbackPlan: string;
+  cutoverDecision: CutoverDecision;
+}
+
 export interface TutorialStep {
   id: string;
   instruction: string;
@@ -141,6 +181,7 @@ export interface Scenario {
   id: string;
   title: string;
   description: string;
+  project: ProjectBrief;
   assets: {
     servers: Server[];
     vms: VM[];

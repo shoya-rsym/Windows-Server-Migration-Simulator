@@ -9,6 +9,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ClipboardList,
   Clock3,
   Cloud,
   Database,
@@ -46,6 +47,7 @@ import type {
   DifficultyMode,
   HypothesisNote,
   ManagerApp,
+  ProjectWorkspace,
   RuntimeEnvironment,
   RuntimeEnvironments,
   RuntimeService,
@@ -55,6 +57,7 @@ import type {
   TransferPackage,
 } from "./domain/models";
 import { loadScenario } from "./domain/scenario";
+import { createInitialProjectWorkspace } from "./domain/project";
 import {
   calculateAuditReport,
   getModeObjective,
@@ -90,6 +93,7 @@ interface SimulationSave {
   auditEvents: AuditEvent[];
   startedAt: number;
   entryId: number;
+  projectWorkspace?: ProjectWorkspace;
 }
 
 function isSimulationSave(value: unknown): value is SimulationSave {
@@ -97,6 +101,29 @@ function isSimulationSave(value: unknown): value is SimulationSave {
   const record = value as Record<string, unknown>;
   const isRecord = (item: unknown) => typeof item === "object" && item !== null && !Array.isArray(item);
   const isStringArray = (item: unknown) => Array.isArray(item) && item.every((entry) => typeof entry === "string");
+  const isProjectWorkspace = (item: unknown) => {
+    if (item === undefined) return true;
+    if (!isRecord(item)) return false;
+    const workspace = item as Record<string, unknown>;
+    const isRecordArray = (value: unknown, fields: string[]) =>
+      Array.isArray(value) && value.every((entry) =>
+        isRecord(entry) && fields.every((field) => typeof entry[field] === "string"),
+      );
+    return isRecordArray(workspace.investigationNotes, ["id", "title", "detail"])
+      && Array.isArray(workspace.investigationNotes)
+      && workspace.investigationNotes.every((entry) => typeof entry.createdAt === "number")
+      && isRecordArray(workspace.architectureEdges, ["id", "from", "to"])
+      && typeof workspace.plannedDowntimeMinutes === "number"
+      && typeof workspace.maintenanceWindow === "string"
+      && typeof workspace.ttlLeadDays === "number"
+      && typeof workspace.noticeLeadDays === "number"
+      && typeof workspace.noticeSubject === "string"
+      && typeof workspace.noticeBody === "string"
+      && typeof workspace.noticeSent === "boolean"
+      && ["expdp", "rman", "dataguard"].includes(String(workspace.migrationStrategy))
+      && typeof workspace.rollbackPlan === "string"
+      && ["pending", "go", "no-go", "rollback", "continue"].includes(String(workspace.cutoverDecision));
+  };
   return record.version === 2
     && ["tutorial", "beginner", "intermediate", "advanced"].includes(String(record.mode))
     && ["onprem", "aws", "azure"].includes(String(record.provider))
@@ -110,6 +137,7 @@ function isSimulationSave(value: unknown): value is SimulationSave {
     && Array.isArray(record.hypotheses) && Array.isArray(record.completedObjectives)
     && isStringArray(record.completedObjectives)
     && Array.isArray(record.knowledgeRecords) && Array.isArray(record.auditEvents)
+    && isProjectWorkspace(record.projectWorkspace)
     && typeof record.startedAt === "number" && typeof record.entryId === "number";
 }
 
@@ -174,6 +202,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const [desktopServerId, setDesktopServerId] = useState(initialPanes[0]);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [projectDeskOpen, setProjectDeskOpen] = useState(false);
   const [guideFeedback, setGuideFeedback] = useState("");
   const [paneServerIds, setPaneServerIds] = useState<[string, string]>(initialPanes);
   const [environments, setEnvironments] = useState<RuntimeEnvironments>(() => createRuntimeEnvironments(scenario));
@@ -192,6 +221,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const [completedObjectives, setCompletedObjectives] = useState<string[]>([]);
   const [knowledgeRecords, setKnowledgeRecords] = useState<KnowledgeRecord[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [projectWorkspace, setProjectWorkspace] = useState<ProjectWorkspace>(() => createInitialProjectWorkspace(scenario.project));
   const [startedAt, setStartedAt] = useState(Date.now);
   const [notice, setNotice] = useState("");
   const [entryId, setEntryId] = useState(0);
@@ -219,6 +249,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       auditEvents,
       startedAt,
       entryId,
+      projectWorkspace,
     };
     try {
       window.localStorage.setItem(saveKey, JSON.stringify(snapshot));
@@ -230,7 +261,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   }, [
     sessionStarted, mode, provider, paneServerIds, environments, dns, dnsDraft, history, inputs,
     activeApps, shellModes, transfer, hypotheses, drafts, taskRuns, completedObjectives, knowledgeRecords,
-    auditEvents, startedAt, entryId,
+    auditEvents, startedAt, entryId, projectWorkspace,
   ]);
 
   const recordAuditEvent = (name: string) => {
@@ -269,12 +300,14 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setCompletedObjectives([]);
     setKnowledgeRecords([]);
     setAuditEvents([]);
+    setProjectWorkspace(createInitialProjectWorkspace(scenario.project));
     setEntryId(0);
     setGuideFeedback("");
     setKnowledgeOpen(false);
     setHypothesisInput("");
     setStartedAt(Date.now());
     setReportOpen(false);
+    setProjectDeskOpen(false);
     setSessionStarted(true);
     setScreen("lab");
   };
@@ -300,16 +333,44 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setCompletedObjectives(storedSave.completedObjectives);
     setKnowledgeRecords(storedSave.knowledgeRecords);
     setAuditEvents(storedSave.auditEvents);
+    setProjectWorkspace(storedSave.projectWorkspace ?? createInitialProjectWorkspace(scenario.project));
     setStartedAt(storedSave.startedAt);
     setEntryId(storedSave.entryId);
     setSessionStarted(true);
     setReportOpen(false);
+    setProjectDeskOpen(false);
     setScreen("lab");
   };
 
   const notify = (message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3000);
+  };
+
+  const sendUserNotice = () => {
+    if (!projectWorkspace.noticeSubject.trim() || !projectWorkspace.noticeBody.trim()) {
+      notify("利用者周知の件名と本文を入力してください。");
+      return;
+    }
+    setProjectWorkspace((previous) => ({ ...previous, noticeSent: true }));
+    recordAuditEvent("project:notice-sent");
+    notify("利用者周知を送信した記録を保存しました。");
+  };
+
+  const recordCutoverDecision = (decision: ProjectWorkspace["cutoverDecision"]) => {
+    setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: decision }));
+    recordAuditEvent(`project:decision:${decision}`);
+    notify(`切替判断を記録しました: ${decision === "go" ? "Go" : decision === "no-go" ? "No-Go" : decision}`);
+  };
+
+  const rollbackCutover = () => {
+    if (!sourceApplication) throw new Error("切戻し先の現行APサーバーがシナリオにありません。");
+    const restoredDns = { ...dns, address: sourceApplication.ipAddress, cachedAddress: sourceApplication.ipAddress };
+    setDns(restoredDns);
+    setDnsDraft(restoredDns);
+    setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: "rollback" }));
+    recordAuditEvent("project:rollback");
+    notify(`DNSを現行AP ${sourceApplication.hostname} に戻しました。クライアント側のDNSキャッシュも更新してください。`);
   };
 
   const openApp = (serverId: string, app: ManagerApp | null) => {
@@ -515,7 +576,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const incidentCount = targetServer && targetEnvironment
     ? getEventLog(targetServer, scenario, targetEnvironment, environments, dns).length
     : 0;
-  const auditReport = calculateAuditReport(scenario, auditEvents, incidentCount, startedAt);
+  const auditReport = calculateAuditReport(scenario, auditEvents, incidentCount, startedAt, Date.now(), projectWorkspace);
 
   if (screen === "desktop") {
     return (
@@ -560,6 +621,9 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
           <div className={`connection-indicator ${hasOpenIssues ? "attention" : ""}`}><i />{hasOpenIssues ? "要確認" : "接続中"}</div>
           <button className={`notes-toggle ${knowledgeOpen ? "active" : ""}`} onClick={() => setKnowledgeOpen((open) => !open)}>
             <BookOpen size={15} /> 知識ノート <span>{knowledgeRecords.length}</span>
+          </button>
+          <button className={`notes-toggle ${projectDeskOpen ? "active" : ""}`} onClick={() => setProjectDeskOpen(true)}>
+            <ClipboardList size={15} /> 案件デスク
           </button>
           <button className={`notes-toggle ${notesOpen ? "active" : ""}`} onClick={() => setNotesOpen((open) => !open)}>
             <Lightbulb size={15} /> 仮説メモ <span>{hypotheses.length}</span>
@@ -704,6 +768,19 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         <footer className="lab-footer"><span>WINDOWS SERVER LAB <i /> {scenario.title}</span><button onClick={() => setScreen("desktop")}>Windowsデスクトップ</button></footer>
       </main>
       {notice && <div className="notice-toast"><Check size={15} />{notice}<button onClick={() => setNotice("")} aria-label="通知を閉じる"><X size={14} /></button></div>}
+      {projectDeskOpen && <ProjectDeskModal
+        scenario={scenario}
+        project={projectWorkspace}
+        dnsAddress={dns.address}
+        sourceAddress={sourceApplication?.ipAddress ?? ""}
+        targetAddress={targetApplication?.ipAddress ?? ""}
+        hasOpenIssues={hasOpenIssues}
+        onChange={setProjectWorkspace}
+        onSendNotice={sendUserNotice}
+        onDecision={recordCutoverDecision}
+        onRollback={rollbackCutover}
+        onClose={() => setProjectDeskOpen(false)}
+      />}
       {reportOpen && <AuditReportModal report={auditReport} onClose={() => setReportOpen(false)} onRestart={() => startFreshSession(true)} />}
     </div>
   );
@@ -814,6 +891,210 @@ function DesktopHome({
   );
 }
 
+function ProjectDeskModal({
+  scenario,
+  project,
+  dnsAddress,
+  sourceAddress,
+  targetAddress,
+  hasOpenIssues,
+  onChange,
+  onSendNotice,
+  onDecision,
+  onRollback,
+  onClose,
+}: {
+  scenario: Scenario;
+  project: ProjectWorkspace;
+  dnsAddress: string;
+  sourceAddress: string;
+  targetAddress: string;
+  hasOpenIssues: boolean;
+  onChange: (project: ProjectWorkspace) => void;
+  onSendNotice: () => void;
+  onDecision: (decision: ProjectWorkspace["cutoverDecision"]) => void;
+  onRollback: () => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<"overview" | "investigation" | "plan" | "cutover">("overview");
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteDetail, setNoteDetail] = useState("");
+  const [edgeFrom, setEdgeFrom] = useState("");
+  const [edgeTo, setEdgeTo] = useState("");
+  const update = (patch: Partial<ProjectWorkspace>) => onChange({ ...project, ...patch });
+
+  const addNote = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const title = noteTitle.trim();
+    const detail = noteDetail.trim();
+    if (!title || !detail) return;
+    update({
+      investigationNotes: [...project.investigationNotes, {
+        id: `${Date.now()}`,
+        title,
+        detail,
+        createdAt: Date.now(),
+      }],
+    });
+    setNoteTitle("");
+    setNoteDetail("");
+  };
+
+  const addEdge = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const from = edgeFrom.trim();
+    const to = edgeTo.trim();
+    if (!from || !to || from === to) return;
+    update({ architectureEdges: [...project.architectureEdges, { id: `${Date.now()}`, from, to }] });
+    setEdgeFrom("");
+    setEdgeTo("");
+  };
+
+  const tabs: Array<{ id: typeof tab; label: string }> = [
+    { id: "overview", label: "案件概要" },
+    { id: "investigation", label: "調査・構成" },
+    { id: "plan", label: "計画・周知" },
+    { id: "cutover", label: "切替判断" },
+  ];
+
+  return (
+    <div className="report-backdrop" role="presentation">
+      <section className="audit-report project-desk" role="dialog" aria-modal="true" aria-labelledby="project-desk-title">
+        <header className="report-header">
+          <div><small>PROJECT CONTROL DESK</small><h2 id="project-desk-title">案件デスク</h2></div>
+          <button onClick={onClose} aria-label="案件デスクを閉じる"><X size={17} /></button>
+        </header>
+        <nav className="project-tabs" aria-label="案件デスクの項目">
+          {tabs.map((item) => <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => setTab(item.id)}>{item.label}</button>)}
+        </nav>
+
+        {tab === "overview" && <div className="project-tab-content">
+          <p className="project-intro">{scenario.title} — 技術作業に加え、調査・設計・周知・切替判断を記録します。入力内容は自動保存されます。</p>
+          <div className="project-brief-grid">
+            <article><small>利用者数</small><strong>{scenario.project.users.toLocaleString()} 人</strong></article>
+            <article><small>許容停止時間</small><strong>{scenario.project.downtimeLimitMinutes} 分</strong></article>
+            <article><small>計画停止枠</small><strong>{scenario.project.downtimeWindow}</strong></article>
+            <article><small>重要度</small><strong>{scenario.project.criticality}</strong></article>
+          </div>
+          <div className="project-section">
+            <h3>案件スコープ</h3>
+            <div className="project-chip-list">{scenario.project.components.map((component) => <span key={component}>{component}</span>)}</div>
+            <p>構成図は「調査・構成」で調査結果をもとに作成します。ここでは正解の接続関係を表示しません。</p>
+          </div>
+          <div className="project-section">
+            <h3>現在の作業記録</h3>
+            <p>調査メモ {project.investigationNotes.length} 件 · 構成図 {project.architectureEdges.length} 接続 · 周知 {project.noticeSent ? "送信済み" : "未送信"}</p>
+            <p>切替判断: {cutoverDecisionLabel(project.cutoverDecision)}</p>
+          </div>
+        </div>}
+
+        {tab === "investigation" && <div className="project-tab-content project-columns">
+          <section className="project-section">
+            <h3>調査ノート</h3>
+            <p>コマンドや管理ツールで得た事実、確認元、移行上の意味を記録します。</p>
+            <form className="project-form" onSubmit={addNote}>
+              <label>見出し<input value={noteTitle} onChange={(event) => setNoteTitle(event.target.value)} placeholder="例: APSV01のJavaバージョン" /></label>
+              <label>調査結果・判断根拠<textarea value={noteDetail} onChange={(event) => setNoteDetail(event.target.value)} rows={3} placeholder="確認した値、確認したサーバー、移行時に必要な対応を記録" /></label>
+              <button className="project-primary-button" type="submit" disabled={!noteTitle.trim() || !noteDetail.trim()}>調査ノートを保存</button>
+            </form>
+            {project.investigationNotes.length === 0
+              ? <p className="project-empty">保存した調査ノートはありません。</p>
+              : <div className="project-record-list">{project.investigationNotes.map((note) => <article key={note.id}><div><strong>{note.title}</strong><button onClick={() => update({ investigationNotes: project.investigationNotes.filter((item) => item.id !== note.id) })} aria-label={`${note.title}を削除`}><X size={13} /></button></div><p>{note.detail}</p></article>)}</div>}
+          </section>
+          <section className="project-section">
+            <h3>構成図の接続を記録</h3>
+            <p>調査で確認した接続元・接続先を入力します。シナリオに定義された依存関係との一致は監査レポートで評価します。</p>
+            <form className="project-form project-edge-form" onSubmit={addEdge}>
+              <label>接続元<input list="project-components" value={edgeFrom} onChange={(event) => setEdgeFrom(event.target.value)} placeholder="例: APサーバ" /></label>
+              <label>接続先<input list="project-components" value={edgeTo} onChange={(event) => setEdgeTo(event.target.value)} placeholder="例: Oracle DB" /></label>
+              <datalist id="project-components">{scenario.project.components.map((component) => <option value={component} key={component} />)}</datalist>
+              <button className="project-primary-button" type="submit" disabled={!edgeFrom.trim() || !edgeTo.trim() || edgeFrom.trim() === edgeTo.trim()}>接続を追加</button>
+            </form>
+            {project.architectureEdges.length === 0
+              ? <p className="project-empty">構成図に記録した接続はありません。</p>
+              : <div className="project-edge-list">{project.architectureEdges.map((edge) => <div key={edge.id}><span>{edge.from}</span><ArrowRight size={14} /><span>{edge.to}</span><button onClick={() => update({ architectureEdges: project.architectureEdges.filter((item) => item.id !== edge.id) })} aria-label={`${edge.from}から${edge.to}の接続を削除`}><X size={13} /></button></div>)}</div>}
+          </section>
+        </div>}
+
+        {tab === "plan" && <div className="project-tab-content project-columns">
+          <section className="project-section">
+            <h3>移行・停止計画</h3>
+            <div className="project-form">
+              <label>作業時間帯<input value={project.maintenanceWindow} onChange={(event) => update({ maintenanceWindow: event.target.value })} placeholder={scenario.project.downtimeWindow} /></label>
+              <label>計画停止時間 (分)<input type="number" min={0} value={project.plannedDowntimeMinutes} onChange={(event) => update({ plannedDowntimeMinutes: Math.max(0, Number(event.target.value)) })} /></label>
+              <label>DB移行方式<select value={project.migrationStrategy} onChange={(event) => {
+                const strategy = event.target.value;
+                if (strategy === "expdp" || strategy === "rman" || strategy === "dataguard") update({ migrationStrategy: strategy });
+              }}>
+                <option value="expdp">EXPDP / IMPDP — 停止後に差分同期が必要</option>
+                <option value="rman">RMAN — バックアップ・リストア</option>
+                <option value="dataguard">Data Guard — 同期後に切替</option>
+              </select></label>
+              <label>切替何日前にTTL短縮するか<input type="number" min={0} value={project.ttlLeadDays} onChange={(event) => update({ ttlLeadDays: Math.max(0, Number(event.target.value)) })} /></label>
+              <label>切替何日前に利用者へ周知するか<input type="number" min={0} value={project.noticeLeadDays} onChange={(event) => update({ noticeLeadDays: Math.max(0, Number(event.target.value)) })} /></label>
+              <label>切戻し手順・判断条件<textarea rows={4} value={project.rollbackPlan} onChange={(event) => update({ rollbackPlan: event.target.value })} placeholder="例: 23:30までにログイン確認できない場合、DNSを旧APへ戻し、旧AP/DBは翌営業日まで維持する。" /></label>
+            </div>
+            <p className="project-plan-note">DB移行方式は計画上の選択です。現在のSQL*Plus画面ではData Pumpの疑似操作を提供します。RMAN・Data Guardの動作差分は後続段階で実装します。</p>
+            <p className={`project-limit-note ${project.plannedDowntimeMinutes > scenario.project.downtimeLimitMinutes ? "warning" : ""}`}>
+              許容停止時間: {scenario.project.downtimeLimitMinutes} 分 · 現在の計画: {project.plannedDowntimeMinutes} 分
+            </p>
+          </section>
+          <section className="project-section">
+            <h3>利用者周知</h3>
+            <p>停止日時・対象業務・利用者への影響を記載し、周知記録を残します。</p>
+            <div className="project-form">
+              <label>件名<input value={project.noticeSubject} onChange={(event) => update({ noticeSubject: event.target.value, noticeSent: false })} /></label>
+              <label>本文<textarea rows={6} value={project.noticeBody} onChange={(event) => update({ noticeBody: event.target.value, noticeSent: false })} /></label>
+            </div>
+            <button className="project-primary-button" onClick={onSendNotice} disabled={!project.noticeSubject.trim() || !project.noticeBody.trim()}>
+              {project.noticeSent ? "周知を再送信" : "周知を送信した記録を残す"}
+            </button>
+            {project.noticeSent && <p className="project-success">利用者周知は送信済みとして記録されています。</p>}
+          </section>
+        </div>}
+
+        {tab === "cutover" && <div className="project-tab-content">
+          <div className="project-cutover-status">
+            <div><small>DNS現在値</small><strong>{dnsAddress}</strong></div>
+            <div><small>切替先</small><strong>{targetAddress || "シナリオ未定義"}</strong></div>
+            <div><small>障害状態</small><strong className={hasOpenIssues ? "project-risk" : "project-safe"}>{hasOpenIssues ? "要確認" : "現在の検出なし"}</strong></div>
+          </div>
+          <div className="project-section">
+            <h3>Go / No-Go判定</h3>
+            <p>新環境の疎通、移行資産、停止枠、利用者周知、切戻し手段、未解決ログを確認して判断を記録してください。判定は記録されますが、DNS操作自体はDNSマネージャーから実施します。</p>
+            <div className="project-decision-actions">
+              <button className="project-primary-button" onClick={() => onDecision("go")}>Go — 切替を進める</button>
+              <button className="project-secondary-button" onClick={() => onDecision("no-go")}>No-Go — 切替を中止</button>
+              {dnsAddress === targetAddress && <button className="project-secondary-button" onClick={onRollback}>DNSを現行APへ切り戻す</button>}
+              {dnsAddress === targetAddress && <button className="project-secondary-button" onClick={() => onDecision("continue")}>障害を許容して継続</button>}
+            </div>
+            <p>現在の判定: <strong>{cutoverDecisionLabel(project.cutoverDecision)}</strong></p>
+            {project.cutoverDecision === "rollback" && <p className="project-success">DNSを旧APへ戻しました。各クライアントのDNSキャッシュも確認してください。</p>}
+          </div>
+          <div className="project-section project-risk-note">
+            <h3>実施時の注意</h3>
+            <p>DNS切替だけでは、新APの疎通・DB接続・認証・バッチ処理は保証されません。切替前後の確認結果と、切戻し判断の期限を記録してください。</p>
+            {sourceAddress && <small>現行AP: {sourceAddress}</small>}
+          </div>
+        </div>}
+
+        <footer className="report-actions"><span>変更はこのブラウザーに自動保存されます。</span><button onClick={onClose}>案件デスクを閉じる</button></footer>
+      </section>
+    </div>
+  );
+}
+
+function cutoverDecisionLabel(decision: ProjectWorkspace["cutoverDecision"]): string {
+  const labels: Record<ProjectWorkspace["cutoverDecision"], string> = {
+    pending: "未判定",
+    go: "Go — 切替可",
+    "no-go": "No-Go — 切替中止",
+    rollback: "切戻し実施",
+    continue: "障害を許容して継続",
+  };
+  return labels[decision];
+}
+
 function AuditReportModal({
   report,
   onClose,
@@ -834,6 +1115,14 @@ function AuditReportModal({
           <div><small>復旧時間</small><strong>{report.recoveryMinutes === null ? "未復旧" : `${report.recoveryMinutes} 分`}</strong></div>
           <div><small>作業時間</small><strong>{report.elapsedMinutes} 分</strong></div>
         </div>
+        <section className="report-quality">
+          <div className="report-quality-heading"><h3>案件品質評価</h3><strong>総合評価: {report.overallGrade}</strong></div>
+          <div className="report-quality-grid">{report.projectScores.map((item) => <article key={item.id}><small>{item.label}</small><strong>{item.score}<span>点</span></strong></article>)}</div>
+        </section>
+        {report.projectFindings.length > 0 && <section className="report-findings">
+          <h3>案件運営の改善項目</h3>
+          {report.projectFindings.map((finding) => <article key={finding.id}><strong>{finding.title}</strong><p>修正方法: {finding.remediation}</p></article>)}
+        </section>}
         <div className="report-checklist"><h3>作業監査</h3>{report.checks.map(({ check, complete, missingOperations }) => <article className={`report-check ${complete ? "complete" : "missing"}`} key={check.id}><span>{complete ? <CheckCircle2 size={15} /> : <X size={15} />}</span><div><strong>{check.title}</strong>{!complete && <><small>未実施の操作: {missingOperations.join(" / ")}</small><small>修正方法: {check.remediation}</small><small>想定影響: {check.impact}</small></>}</div></article>)}</div>
         {report.orderWarnings.length > 0 && <div className="report-order"><strong>手順レビュー</strong>{report.orderWarnings.map((warning) => <p key={warning}>{warning}</p>)}</div>}
         <div className="report-ai-review"><strong><Activity size={14} />AIレビュー (ローカル評価)</strong><p>{report.review}</p><small>外部生成AIへの接続はありません。レビュー規則は後からAIアドバイザーに置き換えられます。</small></div>
