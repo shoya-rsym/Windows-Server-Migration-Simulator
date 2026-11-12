@@ -252,6 +252,23 @@ function getProjectFindings(
     });
   }
   const cutoverDone = events.some((event) => event.name === "dns:cutover");
+  const rollbackDone = events.some((event) => event.name === "dns:rollback");
+  if (rollbackDone
+    && events.some((event) => event.name === "dns:rollback-cache-stale")
+    && !events.some((event) => event.name === "dns:rollback-cache-flushed")) {
+    findings.push({
+      id: "rollback-dns-cache",
+      title: "切戻し後のクライアントDNSキャッシュが旧環境を指していません",
+      remediation: "接続端末で ipconfig /flushdns を実行し、nslookup intra.example.local で旧APのIPに解決されることを確認してください。",
+    });
+  }
+  if (rollbackDone && !events.some((event) => event.name === "verify:rollback")) {
+    findings.push({
+      id: "rollback-verification",
+      title: "切戻し後の旧環境を本番名で確認していません",
+      remediation: "DNSキャッシュを更新した後、curl http://intra.example.local:8080/ を実行し、旧APでHTTP 200になることを確認してください。",
+    });
+  }
   if (cutoverDone && project.cutoverDecision === "pending") {
     findings.push({
       id: "cutover-decision",

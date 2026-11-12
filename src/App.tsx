@@ -430,12 +430,14 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
 
   const rollbackCutover = () => {
     if (!sourceApplication) throw new Error("切戻し先の現行APサーバーがシナリオにありません。");
-    const restoredDns = { ...dns, address: sourceApplication.ipAddress, cachedAddress: sourceApplication.ipAddress };
+    const restoredDns = { ...dns, address: sourceApplication.ipAddress };
     setDns(restoredDns);
     setDnsDraft(restoredDns);
     setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: "rollback" }));
     recordAuditEvent("project:rollback");
-    notify(`DNSを現行AP ${sourceApplication.hostname} に戻しました。クライアント側のDNSキャッシュも更新してください。`);
+    recordAuditEvent("dns:rollback");
+    if (dns.cachedAddress !== sourceApplication.ipAddress) recordAuditEvent("dns:rollback-cache-stale");
+    notify(`DNSを現行AP ${sourceApplication.hostname} に戻しました。クライアントキャッシュは ${dns.cachedAddress} のままです。必要に応じて ipconfig /flushdns を実行してください。`);
   };
 
   const openApp = (serverId: string, app: ManagerApp | null) => {
@@ -525,8 +527,23 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         recordAuditEvent("verify:post-cutover");
       }
     }
+    if (sourceApplication && result.output[0] === "HTTP/1.1 200 OK") {
+      const requestHost = normalized.match(/^curl http:\/\/([^/:]+)/)?.[1];
+      if (requestHost === scenario.assets.dns[0].name.toLowerCase()
+        && dns.address === sourceApplication.ipAddress
+        && dns.cachedAddress === sourceApplication.ipAddress
+        && auditEvents.some((event) => event.name === "dns:rollback")) {
+        recordAuditEvent("verify:rollback");
+      }
+    }
 
     if (result.flushDns) {
+      recordAuditEvent("dns:flush");
+      if (auditEvents.some((event) => event.name === "dns:rollback-cache-stale")
+        && dns.address === sourceApplication?.ipAddress
+        && dns.cachedAddress !== dns.address) {
+        recordAuditEvent("dns:rollback-cache-flushed");
+      }
       setDns((previous) => ({ ...previous, cachedAddress: previous.address }));
     }
 
@@ -1050,6 +1067,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         scenario={scenario}
         project={projectWorkspace}
         dnsAddress={dns.address}
+        cachedDnsAddress={dns.cachedAddress}
         sourceAddress={sourceApplication?.ipAddress ?? ""}
         targetAddress={targetApplication?.ipAddress ?? ""}
         hasOpenIssues={hasOpenIssues}
@@ -1189,6 +1207,7 @@ function ProjectDeskModal({
   scenario,
   project,
   dnsAddress,
+  cachedDnsAddress,
   sourceAddress,
   targetAddress,
   hasOpenIssues,
@@ -1201,6 +1220,7 @@ function ProjectDeskModal({
   scenario: Scenario;
   project: ProjectWorkspace;
   dnsAddress: string;
+  cachedDnsAddress: string;
   sourceAddress: string;
   targetAddress: string;
   hasOpenIssues: boolean;
@@ -1353,6 +1373,7 @@ function ProjectDeskModal({
             <div><small>切替先</small><strong>{targetAddress || "シナリオ未定義"}</strong></div>
             <div><small>障害状態</small><strong className={hasOpenIssues ? "project-risk" : "project-safe"}>{hasOpenIssues ? "要確認" : "現在の検出なし"}</strong></div>
           </div>
+          <p>クライアントDNSキャッシュ: <strong>{cachedDnsAddress}</strong>{cachedDnsAddress !== dnsAddress && " — DNS現在値と異なります。ipconfig /flushdns 後に再確認してください。"}</p>
           <div className="project-section">
             <h3>Go / No-Go判定</h3>
             <p>新環境の疎通、移行資産、停止枠、利用者周知、切戻し手段、未解決ログを確認して判断を記録してください。判定は記録されますが、DNS操作自体はDNSマネージャーから実施します。</p>
