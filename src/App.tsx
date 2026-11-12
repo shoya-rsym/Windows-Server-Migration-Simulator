@@ -66,9 +66,11 @@ import { loadScenario } from "./domain/scenario";
 import { createInitialProjectWorkspace } from "./domain/project";
 import {
   calculateAuditReport,
+  getCutoverReadiness,
   getModeObjective,
   getTutorialProgress,
   type AuditEvent,
+  type CutoverReadinessItem,
   type KnowledgeRecord,
 } from "./domain/progress";
 
@@ -428,7 +430,10 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const recordCutoverDecision = (decision: ProjectWorkspace["cutoverDecision"]) => {
     setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: decision }));
     recordAuditEvent(`project:decision:${decision}`, true);
-    notify(`切替判断を記録しました: ${decision === "go" ? "Go" : decision === "no-go" ? "No-Go" : decision}`);
+    const incompleteReadiness = decision === "go" ? cutoverReadiness.filter((item) => !item.ready) : [];
+    notify(incompleteReadiness.length
+      ? `Go判定を記録しました。未完了の確認項目: ${incompleteReadiness.slice(0, 2).map((item) => item.title).join("、")}${incompleteReadiness.length > 2 ? ` ほか${incompleteReadiness.length - 2}件` : ""}`
+      : `切替判断を記録しました: ${decision === "go" ? "Go" : decision === "no-go" ? "No-Go" : decision}`);
   };
 
   const rollbackCutover = () => {
@@ -549,7 +554,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     if (result.managerApp === "events") recordAuditEvent("investigate:events", true);
     if (targetApplication && result.output[0] === "HTTP/1.1 200 OK") {
       const requestHost = normalized.match(/^curl http:\/\/([^/:]+)/)?.[1];
-      if (requestHost === targetApplication.hostname.toLowerCase() && dns.address !== targetApplication.ipAddress) {
+      if (requestHost === targetApplication.hostname.toLowerCase()) {
         recordAuditEvent("verify:connectivity", true);
       }
       if (requestHost === scenario.assets.dns[0].name.toLowerCase()
@@ -960,6 +965,13 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     projectWorkspace,
     databaseRevisions,
   );
+  const cutoverReadiness = getCutoverReadiness(
+    scenario,
+    auditEvents,
+    projectWorkspace,
+    hasOpenIssues,
+    databaseRevisions,
+  );
   const availableServers = getAvailableServers(scenario, provider, cloudWorkspace);
 
   if (screen === "desktop") {
@@ -1215,6 +1227,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         sourceAddress={sourceApplication?.ipAddress ?? ""}
         targetAddress={targetApplication?.ipAddress ?? ""}
         hasOpenIssues={hasOpenIssues}
+        readinessItems={cutoverReadiness}
         onChange={setProjectWorkspace}
         onSendNotice={sendUserNotice}
         onDecision={recordCutoverDecision}
@@ -1355,6 +1368,7 @@ function ProjectDeskModal({
   sourceAddress,
   targetAddress,
   hasOpenIssues,
+  readinessItems,
   onChange,
   onSendNotice,
   onDecision,
@@ -1368,6 +1382,7 @@ function ProjectDeskModal({
   sourceAddress: string;
   targetAddress: string;
   hasOpenIssues: boolean;
+  readinessItems: CutoverReadinessItem[];
   onChange: (project: ProjectWorkspace) => void;
   onSendNotice: () => void;
   onDecision: (decision: ProjectWorkspace["cutoverDecision"]) => void;
@@ -1519,9 +1534,19 @@ function ProjectDeskModal({
             <div><small>障害状態</small><strong className={hasOpenIssues ? "project-risk" : "project-safe"}>{hasOpenIssues ? "要確認" : "現在の検出なし"}</strong></div>
           </div>
           <p>クライアントDNSキャッシュ: <strong>{cachedDnsAddress}</strong>{cachedDnsAddress !== dnsAddress && " — DNS現在値と異なります。ipconfig /flushdns 後に再確認してください。"}</p>
+          <div className="cutover-readiness" aria-label="切替前チェックリスト">
+            <div className="cutover-readiness-heading">
+              <h3>切替前チェックリスト</h3>
+              <strong>{readinessItems.filter((item) => item.ready).length}/{readinessItems.length} 完了</strong>
+            </div>
+            <ul>{readinessItems.map((item) => <li className={item.ready ? "ready" : "pending"} key={item.id}>
+              <span>{item.ready ? <Check size={14} /> : <AlertCircle size={14} />}</span>
+              <div><strong>{item.title}</strong>{!item.ready && <small>{item.detail}</small>}</div>
+            </li>)}</ul>
+          </div>
           <div className="project-section">
             <h3>Go / No-Go判定</h3>
-            <p>新環境の疎通、移行資産、停止枠、利用者周知、切戻し手段、未解決ログを確認して判断を記録してください。判定は記録されますが、DNS操作自体はDNSマネージャーから実施します。</p>
+            <p>チェックリストの未完了項目はGo判定時にも通知され、監査レポートに記録されます。Go/No-Goは作業判断の記録で、DNS操作自体はDNSマネージャーから実施します。</p>
             <div className="project-decision-actions">
               <button className="project-primary-button" onClick={() => onDecision("go")}>Go — 切替を進める</button>
               <button className="project-secondary-button" onClick={() => onDecision("no-go")}>No-Go — 切替を中止</button>

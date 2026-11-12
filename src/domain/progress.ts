@@ -5,6 +5,12 @@ export interface AuditEvent {
   at: number;
 }
 
+function isCutoverPreflightInvalidator(eventName: string): boolean {
+  return eventName.startsWith("migrate:")
+    || eventName.startsWith("install:middleware:")
+    || ["database:business-write", "database:final-sync", "database:dataguard-sync", "start:resin-service"].includes(eventName);
+}
+
 export interface KnowledgeRecord {
   id: string;
   serverId: string;
@@ -57,15 +63,16 @@ function auditRequirementIndex(checkId: string, requiredEvent: string, scenario:
       : -1;
   }
   if (checkId === "verify-cutover" && requiredEvent === "verify:connectivity") {
-    if (cutoverIndex < 0) {
-      const connectivityIndex = lastEventIndex(events, requiredEvent);
-      return connectivityIndex > rollbackIndex ? connectivityIndex : -1;
-    }
-    const cycleStart = lastEventIndex(events, "dns:rollback", cutoverIndex);
-    for (let index = cutoverIndex - 1; index > cycleStart; index -= 1) {
-      if (events[index].name === requiredEvent) return index;
-    }
-    return -1;
+    const cycleEnd = cutoverIndex > rollbackIndex ? cutoverIndex : events.length;
+    const cycleStart = cutoverIndex > rollbackIndex
+      ? lastEventIndex(events, "dns:rollback", cutoverIndex)
+      : rollbackIndex;
+    const connectivityIndex = lastEventIndex(events, requiredEvent, cycleEnd);
+    const latestChangeIndex = events.reduce((latestIndex, event, index) =>
+      index > cycleStart && index < cycleEnd && isCutoverPreflightInvalidator(event.name)
+        ? index
+        : latestIndex, cycleStart);
+    return connectivityIndex > latestChangeIndex ? connectivityIndex : -1;
   }
   return lastEventIndex(events, requiredEvent);
 }
@@ -82,6 +89,91 @@ export interface AuditReport {
   projectFindings: Array<{ id: string; title: string; remediation: string }>;
   overallGrade: string;
   review: string;
+}
+
+export interface CutoverReadinessItem {
+  id: string;
+  title: string;
+  ready: boolean;
+  detail: string;
+}
+
+export function getCutoverReadiness(
+  scenario: Scenario,
+  events: AuditEvent[],
+  project: ProjectWorkspace,
+  hasOpenIssues: boolean,
+  databaseRevisions?: { source: number; target: number },
+): CutoverReadinessItem[] {
+  const rollbackIndex = lastEventIndex(events, "dns:rollback");
+  const cutoverIndex = lastEventIndex(events, "dns:cutover");
+  const cycleCutoverIndex = cutoverIndex > rollbackIndex ? cutoverIndex : -1;
+  const cycleEndIndex = cycleCutoverIndex >= 0 ? cycleCutoverIndex : events.length;
+  const databaseSyncPending = Boolean(databaseRevisions && databaseRevisions.source > databaseRevisions.target);
+  const findings = new Set(getProjectFindings(scenario, events, project, databaseSyncPending).map((finding) => finding.id));
+  const migrationChangeIndex = events.reduce((latestIndex, event, index) =>
+    index > rollbackIndex && index < cycleEndIndex && isCutoverPreflightInvalidator(event.name)
+      ? index
+      : latestIndex, -1);
+  const connectivityIndex = events.reduce((latestIndex, event, index) =>
+    index > rollbackIndex && index < cycleEndIndex && event.name === "verify:connectivity"
+      ? index
+      : latestIndex, -1);
+  const currentCycleNotice = events.some((event, index) =>
+    index > rollbackIndex && index < cycleEndIndex && event.name === "project:notice-sent",
+  );
+  const ttlPlanReady = project.ttlLeadDays >= 3 && wasTtlPreparedBeforeCutover(scenario, events);
+
+  return [
+    {
+      id: "connectivity",
+      title: "移行先APの直接疎通",
+      ready: connectivityIndex > migrationChangeIndex,
+      detail: "最後の設定変更後に、APSV02宛てのHTTP 200を確認してください。",
+    },
+    {
+      id: "database",
+      title: "選択したDB方式の移行と同期",
+      ready: hasCompletedDatabaseMigration(project.migrationStrategy, events)
+        && !databaseSyncPending
+        && !findings.has("database-final-sync"),
+      detail: findings.has("database-migration-strategy")
+        ? findings.has("database-final-sync")
+          ? "選択方式の手順を完了し、最新のデータ世代まで同期してください。"
+          : "案件デスクで選択したDB方式の実行手順を完了してください。"
+        : "DB移行方式の実施と現行・移行先のデータ世代を確認してください。",
+    },
+    {
+      id: "dns-ttl",
+      title: "DNS TTLの計画と事前適用",
+      ready: ttlPlanReady,
+      detail: "3日前以上の短縮計画を立て、Aレコード変更とは別にTTLを300秒以下へ適用してください。",
+    },
+    {
+      id: "user-notice",
+      title: "今回の切替サイクルの利用者周知",
+      ready: project.noticeSent && project.noticeLeadDays >= 1 && currentCycleNotice,
+      detail: "停止時間・対象業務・問い合わせ先を記載し、前日までに周知記録を残してください。",
+    },
+    {
+      id: "downtime",
+      title: "許容停止時間内の作業計画",
+      ready: !findings.has("downtime"),
+      detail: `計画停止時間を${scenario.project.downtimeLimitMinutes}分以内に設定してください。`,
+    },
+    {
+      id: "rollback-plan",
+      title: "切戻し条件と手順",
+      ready: !findings.has("rollback-plan"),
+      detail: "判断期限、DNSを戻す手順、旧環境の維持時間、利用者連絡方法を具体化してください。",
+    },
+    {
+      id: "unresolved-issues",
+      title: "未解決の障害・ログ",
+      ready: !hasOpenIssues,
+      detail: "イベントビューアーなどで原因を特定し、移行先のエラーを解消してから判断してください。",
+    },
+  ];
 }
 
 export interface TutorialProgress {
@@ -361,9 +453,9 @@ function getProjectFindings(
   const cutoverIndex = lastEventIndex(events, "dns:cutover");
   const latestRollbackIndex = lastEventIndex(events, "dns:rollback");
   const cutoverCycleStartIndex = cutoverIndex >= 0
-    ? lastEventIndex(events, "dns:rollback", cutoverIndex)
-    : -1;
-  const cutoverDone = cutoverIndex >= 0;
+    ? latestRollbackIndex > cutoverIndex ? latestRollbackIndex : lastEventIndex(events, "dns:rollback", cutoverIndex)
+    : latestRollbackIndex;
+  const cutoverDone = cutoverIndex > latestRollbackIndex;
   const ttlPrepared = wasTtlPreparedBeforeCutover(scenario, events);
   const decisionEvents = events
     .map((event, index) => ({ event, index }))
@@ -429,9 +521,14 @@ function getProjectFindings(
   const connectivityIndex = latestGoIndex < 0
     ? -1
     : lastEventIndex(events, "verify:connectivity", latestGoIndex);
+  const preflightEndIndex = cutoverDone ? cutoverIndex : events.length;
+  const latestPreflightChangeIndex = events.reduce((latestIndex, event, index) =>
+    index > cutoverCycleStartIndex && index < preflightEndIndex && isCutoverPreflightInvalidator(event.name)
+      ? index
+      : latestIndex, cutoverCycleStartIndex);
   if (latestGoIndex >= 0
     && (connectivityIndex <= cutoverCycleStartIndex
-      || (cutoverDone && connectivityIndex > cutoverCycleStartIndex && connectivityIndex > cutoverIndex))) {
+      || connectivityIndex <= latestPreflightChangeIndex)) {
     findings.push({
       id: "preflight",
       title: "新環境の疎通確認前にGo判定、または切替を実施しています",
