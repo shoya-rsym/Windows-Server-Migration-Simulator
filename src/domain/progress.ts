@@ -12,6 +12,46 @@ export interface KnowledgeRecord {
   explanation: string;
 }
 
+function lastEventIndex(events: AuditEvent[], name: string, beforeIndex = events.length): number {
+  for (let index = Math.min(beforeIndex, events.length) - 1; index >= 0; index -= 1) {
+    if (events[index].name === name) return index;
+  }
+  return -1;
+}
+
+function auditRequirementIndex(checkId: string, requiredEvent: string, scenario: Scenario, events: AuditEvent[]): number {
+  const cutoverIndex = lastEventIndex(events, "dns:cutover");
+  const rollbackIndex = lastEventIndex(events, "dns:rollback");
+  if (checkId === "reduce-dns-ttl" && requiredEvent === "dns:ttl-lowered") {
+    if (!wasTtlPreparedBeforeCutover(scenario, events)) return -1;
+    const beforeCutover = cutoverIndex < 0 ? events.length : cutoverIndex;
+    const preparedIndex = lastEventIndex(events, "dns:ttl-prepared", beforeCutover);
+    if (preparedIndex >= 0) return preparedIndex;
+    const loweredIndex = lastEventIndex(events, "dns:ttl-lowered", beforeCutover);
+    return loweredIndex >= 0 ? loweredIndex : Math.max(0, cutoverIndex);
+  }
+  if (checkId === "cutover-dns" && requiredEvent === "dns:cutover") {
+    return cutoverIndex > rollbackIndex ? cutoverIndex : -1;
+  }
+  if (checkId === "verify-post-cutover" && requiredEvent === "verify:post-cutover") {
+    return cutoverIndex > rollbackIndex && lastEventIndex(events, requiredEvent) > cutoverIndex
+      ? lastEventIndex(events, requiredEvent)
+      : -1;
+  }
+  if (checkId === "verify-cutover" && requiredEvent === "verify:connectivity") {
+    if (cutoverIndex < 0) {
+      const connectivityIndex = lastEventIndex(events, requiredEvent);
+      return connectivityIndex > rollbackIndex ? connectivityIndex : -1;
+    }
+    const cycleStart = lastEventIndex(events, "dns:rollback", cutoverIndex);
+    for (let index = cutoverIndex - 1; index > cycleStart; index -= 1) {
+      if (events[index].name === requiredEvent) return index;
+    }
+    return -1;
+  }
+  return lastEventIndex(events, requiredEvent);
+}
+
 export interface AuditReport {
   checks: Array<{ check: AuditCheck; complete: boolean; missingOperations: string[] }>;
   successRate: number;
@@ -67,9 +107,9 @@ export function calculateAuditReport(
 ): AuditReport {
   const checks = scenario.auditChecks.map((check) => ({
     check,
-    complete: check.requiredEvents.every((required) => events.some((event) => event.name === required)),
+    complete: check.requiredEvents.every((required) => auditRequirementIndex(check.id, required, scenario, events) >= 0),
     missingOperations: check.requiredEvents.flatMap((required, index) =>
-      events.some((event) => event.name === required) ? [] : [check.operationGuidance[index] ?? required],
+      auditRequirementIndex(check.id, required, scenario, events) >= 0 ? [] : [check.operationGuidance[index] ?? required],
     ),
   }));
   const totalWeight = scenario.auditChecks.reduce((sum, check) => sum + check.weight, 0);
@@ -80,7 +120,9 @@ export function calculateAuditReport(
     if (!complete) return [];
     const rank = orderRank.get(check.id);
     if (rank === undefined) return [];
-    const completionAt = Math.max(...check.requiredEvents.map((required) => events.find((event) => event.name === required)?.at ?? 0));
+    const completionAt = Math.max(...check.requiredEvents.map((required) =>
+      events[auditRequirementIndex(check.id, required, scenario, events)]?.at ?? 0,
+    ));
     return [{ check, rank, completionAt }];
   }).sort((left, right) => left.completionAt - right.completionAt);
   const orderWarnings: string[] = [];
@@ -96,8 +138,14 @@ export function calculateAuditReport(
   ).length;
   const ttlMissed = !wasTtlPreparedBeforeCutover(scenario, events);
   const estimatedDowntimeMinutes = missingCriticalChecks * 5 + (ttlMissed ? 30 : 0);
-  const cutoverAt = events.find((event) => event.name === "dns:cutover")?.at;
-  const investigationAt = events.find((event) => event.name === "investigate:events")?.at;
+  const latestCutoverIndex = lastEventIndex(events, "dns:cutover");
+  const cutoverAt = events[latestCutoverIndex]?.at;
+  const investigationIndex = latestCutoverIndex < 0
+    ? lastEventIndex(events, "investigate:events")
+    : lastEventIndex(events, "investigate:events") > latestCutoverIndex
+      ? lastEventIndex(events, "investigate:events")
+      : -1;
+  const investigationAt = events[investigationIndex]?.at;
   const recoveryMinutes = incidentCount === 0
     ? 0
     : cutoverAt !== undefined && investigationAt !== undefined
@@ -163,7 +211,7 @@ function calculateProjectScores(
   const downtimeScore = project.plannedDowntimeMinutes <= scenario.project.downtimeLimitMinutes ? 100 : 0;
   const hasRollbackPlan = project.rollbackPlan.trim().length >= 20;
   const designScore = Math.round(dependencyScore * 0.6 + downtimeScore * 0.2 + (hasRollbackPlan ? 20 : 0));
-  const cutoverDone = eventNames.has("dns:cutover");
+  const cutoverDone = lastEventIndex(events, "dns:cutover") > lastEventIndex(events, "dns:rollback");
   const eventLogReviewed = eventNames.has("investigate:events");
   const incidentResponseScore = cutoverDone
     ? incidentCount === 0 ? 100 : eventLogReviewed ? Math.max(20, 70 - incidentCount * 15) : Math.max(0, 40 - incidentCount * 15)
@@ -193,15 +241,24 @@ function calculateProjectScores(
 }
 
 function wasTtlPreparedBeforeCutover(scenario: Scenario, events: AuditEvent[]): boolean {
-  if ((scenario.assets.dns[0]?.ttlSeconds ?? Infinity) <= 300) return true;
-
-  const cutoverIndex = events.findIndex((event) => event.name === "dns:cutover");
-  if (events.some((event, index) => event.name === "dns:ttl-prepared" && (cutoverIndex < 0 || index < cutoverIndex))) {
+  const cutoverIndex = lastEventIndex(events, "dns:cutover");
+  const beforeCutover = cutoverIndex < 0 ? events.length : cutoverIndex;
+  const preparedIndex = lastEventIndex(events, "dns:ttl-prepared", beforeCutover);
+  const invalidatedIndex = lastEventIndex(events, "dns:ttl-invalidated", beforeCutover);
+  if (preparedIndex > invalidatedIndex) {
     return true;
   }
 
-  return !events.some((event) => event.name === "dns:ttl-lowered-during-cutover")
-    && events.some((event, index) => event.name === "dns:ttl-lowered" && (cutoverIndex < 0 || index < cutoverIndex));
+  if ((scenario.assets.dns[0]?.ttlSeconds ?? Infinity) <= 300 && invalidatedIndex < 0) return true;
+
+  const hasVersionedTtlEvents = events.some((event, index) =>
+    index < beforeCutover && ["dns:ttl-prepared", "dns:ttl-invalidated"].includes(event.name),
+  );
+  const loweredDuringCurrentCutover = cutoverIndex >= 0
+    && events.some((event, index) => event.name === "dns:ttl-lowered-during-cutover" && index > cutoverIndex);
+  return !hasVersionedTtlEvents
+    && !loweredDuringCurrentCutover
+    && lastEventIndex(events, "dns:ttl-lowered", beforeCutover) >= 0;
 }
 
 function getProjectFindings(
@@ -264,36 +321,50 @@ function getProjectFindings(
       remediation: "判断期限、DNSを旧APへ戻す手順、旧環境を維持する時間、利用者への連絡方法を記載してください。",
     });
   }
-  const cutoverIndex = events.findIndex((event) => event.name === "dns:cutover");
+  const cutoverIndex = lastEventIndex(events, "dns:cutover");
+  const latestRollbackIndex = lastEventIndex(events, "dns:rollback");
+  const cutoverCycleStartIndex = cutoverIndex >= 0
+    ? lastEventIndex(events, "dns:rollback", cutoverIndex)
+    : -1;
   const cutoverDone = cutoverIndex >= 0;
   const ttlPrepared = wasTtlPreparedBeforeCutover(scenario, events);
   const decisionEvents = events
     .map((event, index) => ({ event, index }))
-    .filter(({ event }) => event.name === "project:decision:go" || event.name === "project:decision:no-go");
+    .filter(({ event, index }) =>
+      index > cutoverCycleStartIndex
+      && (event.name === "project:decision:go" || event.name === "project:decision:no-go"),
+    );
   const latestDecision = decisionEvents[decisionEvents.length - 1];
-  const noticeIndex = events.findIndex((event) => event.name === "project:notice-sent");
-  const cutoverCacheStale = events.some((event) => event.name === "dns:cutover-cache-stale");
-  const rollbackDone = events.some((event) => event.name === "dns:rollback");
-  if (rollbackDone
-    && events.some((event) => event.name === "dns:rollback-cache-stale")
-    && !events.some((event) => event.name === "dns:rollback-cache-flushed")) {
+  const noticeIndex = events.reduce((latestIndex, event, index) =>
+    index > cutoverCycleStartIndex && event.name === "project:notice-sent" ? index : latestIndex, -1);
+  const latestCutoverCacheStaleIndex = lastEventIndex(events, "dns:cutover-cache-stale");
+  const latestCutoverCacheFlushIndex = lastEventIndex(events, "dns:cutover-cache-flushed");
+  const latestRollbackCacheStaleIndex = lastEventIndex(events, "dns:rollback-cache-stale");
+  const latestRollbackCacheFlushIndex = lastEventIndex(events, "dns:rollback-cache-flushed");
+  const rollbackIsLatestTransition = latestRollbackIndex > cutoverIndex;
+  const cutoverIsLatestTransition = cutoverIndex > latestRollbackIndex;
+  if (rollbackIsLatestTransition
+    && latestRollbackCacheStaleIndex > latestRollbackIndex
+    && latestRollbackCacheFlushIndex < latestRollbackCacheStaleIndex) {
     findings.push({
       id: "rollback-dns-cache",
       title: "切戻し後のクライアントDNSキャッシュが旧環境を指していません",
       remediation: "接続端末で ipconfig /flushdns を実行し、nslookup intra.example.local で旧APのIPに解決されることを確認してください。",
     });
   }
-  if (rollbackDone && !events.some((event) => event.name === "verify:rollback")) {
+  if (rollbackIsLatestTransition && lastEventIndex(events, "verify:rollback") < latestRollbackIndex) {
     findings.push({
       id: "rollback-verification",
       title: "切戻し後の旧環境を本番名で確認していません",
       remediation: "DNSキャッシュを更新した後、curl http://intra.example.local:8080/ を実行し、旧APでHTTP 200になることを確認してください。",
     });
   }
-  if (cutoverDone && cutoverCacheStale
-    && !rollbackDone
-    && !events.some((event) => event.name === "dns:cutover-cache-flushed")) {
-    const ttlChangedDuringCutover = events.some((event) => event.name === "dns:ttl-lowered-during-cutover");
+  if (cutoverIsLatestTransition
+    && latestCutoverCacheStaleIndex > cutoverIndex
+    && latestCutoverCacheFlushIndex < latestCutoverCacheStaleIndex) {
+    const ttlChangedDuringCutover = events.some((event, index) =>
+      event.name === "dns:ttl-lowered-during-cutover" && index > cutoverIndex,
+    );
     findings.push({
       id: "cutover-dns-cache",
       title: "DNS切替後もクライアントDNSキャッシュが旧APを指しています",
@@ -317,10 +388,13 @@ function getProjectFindings(
     });
   }
   const latestGoIndex = events.reduce((latestIndex, event, index) =>
-    event.name === "project:decision:go" ? index : latestIndex, -1);
-  const connectivityIndex = events.findIndex((event) => event.name === "verify:connectivity");
+    index > cutoverCycleStartIndex && event.name === "project:decision:go" ? index : latestIndex, -1);
+  const connectivityIndex = latestGoIndex < 0
+    ? -1
+    : lastEventIndex(events, "verify:connectivity", latestGoIndex);
   if (latestGoIndex >= 0
-    && (connectivityIndex < 0 || connectivityIndex > latestGoIndex || (cutoverDone && connectivityIndex > cutoverIndex))) {
+    && (connectivityIndex <= cutoverCycleStartIndex
+      || (cutoverDone && connectivityIndex > cutoverCycleStartIndex && connectivityIndex > cutoverIndex))) {
     findings.push({
       id: "preflight",
       title: "新環境の疎通確認前にGo判定、または切替を実施しています",
@@ -334,11 +408,20 @@ function getProjectFindings(
       remediation: "未解決事項を修正するか、切替を中止してください。既に切替済みの場合は影響を評価し、必要なら切戻してください。",
     });
   }
-  if (cutoverDone && noticeIndex > cutoverIndex) {
+  if (cutoverDone && (noticeIndex < 0 || noticeIndex > cutoverIndex)) {
     findings.push({
       id: "late-user-notice",
-      title: "DNS切替後に利用者周知を送信しています",
-      remediation: "既に切替済みの場合は利用者影響と問い合わせ状況を確認してください。次回作業では切替前日までに停止時間・対象業務・問い合わせ先を周知してください。",
+      title: noticeIndex > cutoverIndex
+        ? "DNS切替後に利用者周知を送信しています"
+        : "今回の切替サイクル前に利用者周知を記録していません",
+      remediation: "既に切替済みの場合は利用者影響と問い合わせ状況を確認してください。再切替前に停止時間・対象業務・問い合わせ先を周知し、送信記録を残してください。",
+    });
+  }
+  if (rollbackIsLatestTransition) {
+    findings.push({
+      id: "migration-rolled-back",
+      title: "最終状態は現行APへの切戻しです",
+      remediation: "移行完了ではなく切戻しとして評価されています。新環境への移行を再開する場合は、原因を解消し、再切替前に疎通確認とGo判定をやり直してください。",
     });
   }
   return findings;

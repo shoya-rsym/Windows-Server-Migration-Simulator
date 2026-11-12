@@ -418,7 +418,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       return;
     }
     setProjectWorkspace((previous) => ({ ...previous, noticeSent: true }));
-    recordAuditEvent("project:notice-sent");
+    recordAuditEvent("project:notice-sent", true);
     notify("利用者周知を送信した記録を保存しました。");
   };
 
@@ -434,15 +434,15 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setDns(restoredDns);
     setDnsDraft(restoredDns);
     setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: "rollback" }));
-    recordAuditEvent("project:rollback");
-    recordAuditEvent("dns:rollback");
-    if (dns.cachedAddress !== sourceApplication.ipAddress) recordAuditEvent("dns:rollback-cache-stale");
+    recordAuditEvent("project:rollback", true);
+    recordAuditEvent("dns:rollback", true);
+    if (dns.cachedAddress !== sourceApplication.ipAddress) recordAuditEvent("dns:rollback-cache-stale", true);
     notify(`DNSを現行AP ${sourceApplication.hostname} に戻しました。クライアントキャッシュは ${dns.cachedAddress} のままです。必要に応じて ipconfig /flushdns を実行してください。`);
   };
 
   const openApp = (serverId: string, app: ManagerApp | null) => {
     setActiveApps((previous) => ({ ...previous, [serverId]: app }));
-    if (app === "events") recordAuditEvent("investigate:events");
+    if (app === "events") recordAuditEvent("investigate:events", true);
     if (app === "database") {
       const server = scenario.assets.servers.find((item) => item.id === serverId);
       if (server) recordAuditEvent(`inspect:oracle:${server.stage}`);
@@ -471,6 +471,14 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
     );
     const normalized = rawCommand.trim().toLowerCase().replace(/\s+/g, " ");
+    const lastAuditEventIndex = (name: string) => auditEvents.reduce(
+      (latestIndex, event, index) => event.name === name ? index : latestIndex,
+      -1,
+    );
+    const latestCutoverIndex = lastAuditEventIndex("dns:cutover");
+    const latestRollbackIndex = lastAuditEventIndex("dns:rollback");
+    const cutoverIsCurrent = latestCutoverIndex > latestRollbackIndex;
+    const rollbackIsCurrent = latestRollbackIndex > latestCutoverIndex;
 
     if (result.databaseTransfer === "export") {
       exportAsset(serverId, "database");
@@ -515,16 +523,17 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     if ((normalized === "sqlplus" || normalized === "sqlplus / as sysdba" || normalized === "lsnrctl status") && server.role === "database") {
       recordAuditEvent(`inspect:oracle:${server.stage}`);
     }
-    if (result.managerApp === "events") recordAuditEvent("investigate:events");
+    if (result.managerApp === "events") recordAuditEvent("investigate:events", true);
     if (targetApplication && result.output[0] === "HTTP/1.1 200 OK") {
       const requestHost = normalized.match(/^curl http:\/\/([^/:]+)/)?.[1];
       if (requestHost === targetApplication.hostname.toLowerCase() && dns.address !== targetApplication.ipAddress) {
-        recordAuditEvent("verify:connectivity");
+        recordAuditEvent("verify:connectivity", true);
       }
       if (requestHost === scenario.assets.dns[0].name.toLowerCase()
         && dns.address === targetApplication.ipAddress
-        && dns.cachedAddress === targetApplication.ipAddress) {
-        recordAuditEvent("verify:post-cutover");
+        && dns.cachedAddress === targetApplication.ipAddress
+        && cutoverIsCurrent) {
+        recordAuditEvent("verify:post-cutover", true);
       }
     }
     if (sourceApplication && result.output[0] === "HTTP/1.1 200 OK") {
@@ -532,22 +541,30 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       if (requestHost === scenario.assets.dns[0].name.toLowerCase()
         && dns.address === sourceApplication.ipAddress
         && dns.cachedAddress === sourceApplication.ipAddress
-        && auditEvents.some((event) => event.name === "dns:rollback")) {
-        recordAuditEvent("verify:rollback");
+        && rollbackIsCurrent) {
+        recordAuditEvent("verify:rollback", true);
       }
     }
 
     if (result.flushDns) {
-      recordAuditEvent("dns:flush");
-      if (auditEvents.some((event) => event.name === "dns:cutover-cache-stale")
+      recordAuditEvent("dns:flush", true);
+      const cutoverCacheStaleIndex = lastAuditEventIndex("dns:cutover-cache-stale");
+      const cutoverCacheFlushedIndex = lastAuditEventIndex("dns:cutover-cache-flushed");
+      if (cutoverIsCurrent
+        && cutoverCacheStaleIndex > latestCutoverIndex
+        && cutoverCacheFlushedIndex < cutoverCacheStaleIndex
         && dns.address === targetApplication?.ipAddress
         && dns.cachedAddress !== dns.address) {
-        recordAuditEvent("dns:cutover-cache-flushed");
+        recordAuditEvent("dns:cutover-cache-flushed", true);
       }
-      if (auditEvents.some((event) => event.name === "dns:rollback-cache-stale")
+      const rollbackCacheStaleIndex = lastAuditEventIndex("dns:rollback-cache-stale");
+      const rollbackCacheFlushedIndex = lastAuditEventIndex("dns:rollback-cache-flushed");
+      if (rollbackIsCurrent
+        && rollbackCacheStaleIndex > latestRollbackIndex
+        && rollbackCacheFlushedIndex < rollbackCacheStaleIndex
         && dns.address === sourceApplication?.ipAddress
         && dns.cachedAddress !== dns.address) {
-        recordAuditEvent("dns:rollback-cache-flushed");
+        recordAuditEvent("dns:rollback-cache-flushed", true);
       }
       setDns((previous) => ({ ...previous, cachedAddress: previous.address }));
     }
@@ -986,23 +1003,58 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                 onDnsApply={() => {
                   const addressChanged = dnsDraft.address !== dns.address;
                   const ttlLowered = dnsDraft.ttlSeconds < dns.ttlSeconds;
+                  const ttlChanged = dnsDraft.ttlSeconds !== dns.ttlSeconds;
+                  const latestCutoverIndex = auditEvents.reduce(
+                    (latestIndex, event, index) => event.name === "dns:cutover" ? index : latestIndex,
+                    -1,
+                  );
+                  const latestRollbackIndex = auditEvents.reduce(
+                    (latestIndex, event, index) => event.name === "dns:rollback" ? index : latestIndex,
+                    -1,
+                  );
+                  const isRollback = Boolean(addressChanged
+                    && sourceApplication
+                    && dnsDraft.address === sourceApplication.ipAddress
+                    && latestCutoverIndex > latestRollbackIndex);
                   const ttlPrepared = !addressChanged && ttlLowered && dnsDraft.ttlSeconds <= 300;
                   const nextDns = {
                     ...dnsDraft,
-                    cachedAddress: !addressChanged || dns.ttlSeconds > 300
+                    cachedAddress: isRollback || !addressChanged || dns.ttlSeconds > 300
                       ? dns.cachedAddress
                       : dnsDraft.address,
                   };
                   setDns(nextDns);
                   setDnsDraft(nextDns);
-                  if (ttlLowered) recordAuditEvent("dns:ttl-lowered");
-                  if (ttlPrepared) recordAuditEvent("dns:ttl-prepared");
-                  if (addressChanged && nextDns.address === targetApplication?.ipAddress) {
-                    recordAuditEvent("dns:cutover");
-                    if (ttlLowered) recordAuditEvent("dns:ttl-lowered-during-cutover");
-                    if (nextDns.cachedAddress !== nextDns.address) recordAuditEvent("dns:cutover-cache-stale");
+                  if (ttlChanged && dnsDraft.ttlSeconds > 300) recordAuditEvent("dns:ttl-invalidated", true);
+                  if (ttlLowered) recordAuditEvent("dns:ttl-lowered", true);
+                  if (ttlPrepared) recordAuditEvent("dns:ttl-prepared", true);
+                  if (isRollback && sourceApplication) {
+                    setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: "rollback" }));
+                    recordAuditEvent("project:rollback", true);
+                    recordAuditEvent("dns:rollback", true);
+                    if (nextDns.cachedAddress !== sourceApplication.ipAddress) {
+                      recordAuditEvent("dns:rollback-cache-stale", true);
+                    }
+                    notify(`DNSを現行AP ${sourceApplication.hostname} に戻しました。クライアントキャッシュは ${nextDns.cachedAddress} のままです。`);
+                  } else if (addressChanged && nextDns.address === targetApplication?.ipAddress) {
+                    const latestRollbackIndex = auditEvents.reduce(
+                      (latestIndex, event, index) => event.name === "dns:rollback" ? index : latestIndex,
+                      -1,
+                    );
+                    const decisionRecordedForCycle = auditEvents.some((event, index) =>
+                      index > latestRollbackIndex
+                      && (event.name === "project:decision:go" || event.name === "project:decision:no-go"),
+                    );
+                    if (!decisionRecordedForCycle) {
+                      setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: "pending" }));
+                    }
+                    recordAuditEvent("dns:cutover", true);
+                    if (ttlLowered) recordAuditEvent("dns:ttl-lowered-during-cutover", true);
+                    if (nextDns.cachedAddress !== nextDns.address) recordAuditEvent("dns:cutover-cache-stale", true);
+                    notify("DNSを新APへ切り替えました。nslookupとHTTP疎通でキャッシュ状態を確認してください。");
+                  } else {
+                    notify("DNSレコードを適用しました。切替後はnslookupとHTTP疎通でキャッシュ状態を確認してください。");
                   }
-                  notify("TTLはAレコード変更前に単独で適用してください。切替後はnslookupとHTTP疎通でキャッシュ状態を確認してください。");
                 }}
                 onJdbcChange={(value) => {
                   const key = activeApp === "resinConfig" ? resinConfigDraftKey(serverId) : jdbcDraftKey(serverId);
