@@ -204,6 +204,7 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .notepad-editor:focus { border-color: #8cb4e8; }
 .database-console { display: flex; flex-direction: column; gap: 7px; padding: 10px; color: #b7c8d8; background: #182434; border-radius: 4px; font: 8.8px/1.4 Consolas,monospace; }
 .database-console strong { color: #e1edf6; font-weight: 500; }
+.middleware-list { display: grid; gap: 7px; }.middleware-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 8px 10px; border: 1px solid #e2e8ef; border-radius: 4px; background: white; }.middleware-row > div { display: flex; flex-direction: column; gap: 4px; }.middleware-row strong { color: #4f627a; font-size: 12.5px; }.middleware-row small { color: #8896a8; font-size: 10.8px; }.middleware-row button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 90px; padding: 7px 9px; font-size: 10.8px; }.middleware-row button.installed { color: #4e8d6a; border: 1px solid #d5e8dc; border-radius: 4px; background: #f3faf5; }.middleware-row button:disabled { cursor: not-allowed; }.middleware-note { margin-top: 9px; padding: 8px 9px; color: #70849b; border-left: 3px solid #6da0dc; background: #f3f7fc; font-size: 10.8px; line-height: 1.5; }
 .database-schema-title { display: flex; justify-content: space-between; margin: 13px 0 7px; color: #5a6c83; font-size: 10.0px; }
 .database-schema-title span { color: #91a0b1; font-size: 8.8px; }
 .schema-list { display: flex; flex-direction: column; gap: 5px; }

@@ -79,6 +79,7 @@ export interface TutorialStep {
 }
 
 export type ManagerApp =
+  | "setup"
   | "services"
   | "tasks"
   | "certificates"
@@ -211,6 +212,7 @@ export interface Scenario {
 }
 
 export interface RuntimeEnvironment {
+  installedSoftware: string[];
   services: RuntimeService[];
   tasks: Task[];
   certificates: Certificate[];

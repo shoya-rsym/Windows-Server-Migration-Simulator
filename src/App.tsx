@@ -374,10 +374,14 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setCloudWorkspace(storedSave.cloudWorkspace
       ?? (storedSave.provider === "aws" ? createLegacyAwsWorkspace(scenario) : createInitialCloudWorkspace()));
     setPaneServerIds(storedSave.paneServerIds);
-    setEnvironments(Object.fromEntries(Object.entries(storedSave.environments).map(([serverId, environment]) => [
-      serverId,
-      { ...environment, databaseRevision: environment.databaseRevision ?? 0 },
-    ])));
+    setEnvironments(Object.fromEntries(Object.entries(storedSave.environments).map(([serverId, environment]) => {
+      const server = scenario.assets.servers.find((item) => item.id === serverId);
+      return [serverId, {
+        ...environment,
+        installedSoftware: environment.installedSoftware ?? [...(server?.software ?? [])],
+        databaseRevision: environment.databaseRevision ?? 0,
+      }];
+    })));
     setDns(storedSave.dns);
     setDnsDraft(storedSave.dnsDraft);
     setHistory(storedSave.history);
@@ -551,6 +555,25 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     if (!transfer || transfer.sourceServerId === serverId) return;
     const target = environments[serverId];
     if (!target) throw new Error(`Unknown server session: ${serverId}`);
+    const targetServer = scenario.assets.servers.find((item) => item.id === serverId);
+    if (!targetServer) throw new Error(`Unknown server asset: ${serverId}`);
+    if (targetServer.stage === "target" && transfer.kind === "services") {
+      const requiredPrefix = targetServer.role === "application" ? "resin " : "oracle ";
+      if (!target.installedSoftware.some((item) => item.toLowerCase().startsWith(requiredPrefix))) {
+        notify(`${targetServer.role === "application" ? "Resin" : "Oracle Database"}を先にインストールしてください。`);
+        return;
+      }
+    }
+    if (targetServer.stage === "target" && transfer.kind === "database") {
+      if (!target.databaseVersion) {
+        notify("Data Pumpのインポート前に、移行先へOracle Databaseをインストールしてください。");
+        return;
+      }
+      if (!target.services.some((service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running")) {
+        notify("Data Pumpのインポート前に、services.mscでOracleサービスを起動してください。");
+        return;
+      }
+    }
 
     if (transfer.kind === "services") {
       const items: RuntimeService[] = transfer.items.map((service) => ({
@@ -612,6 +635,24 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     const target = environments[serverId];
     if (!target) throw new Error(`Unknown server session: ${serverId}`);
     const service = target.services.find((item) => item.id === serviceId);
+    if (service?.status === "stopped") {
+      const software = target.installedSoftware ?? [];
+      if (service.name.toLowerCase().includes("resin")
+        && !software.some((item) => item.toLowerCase().startsWith("resin "))) {
+        notify("Resinがインストールされていません。先にソフトウェア構成から導入してください。");
+        return;
+      }
+      if (service.name.toLowerCase().includes("resin")
+        && !software.some((item) => item.toLowerCase().startsWith("java "))) {
+        notify("Resinの起動にはJavaが必要です。先にJavaをインストールしてください。");
+        return;
+      }
+      if (service.name.toLowerCase().startsWith("oracleservice")
+        && !software.some((item) => item.toLowerCase().startsWith("oracle "))) {
+        notify("Oracle Databaseがインストールされていません。先にソフトウェア構成から導入してください。");
+        return;
+      }
+    }
     if (serverId === targetApplication?.id && service?.name.toLowerCase().includes("resin") && service.status === "stopped") {
       recordAuditEvent("start:resin-service");
     }
@@ -626,6 +667,64 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         ),
       },
     }));
+  };
+
+  const installMiddleware = (serverId: string, softwareName: string) => {
+    const server = scenario.assets.servers.find((item) => item.id === serverId);
+    const environment = environments[serverId];
+    if (!server || !environment) throw new Error(`Unknown server session: ${serverId}`);
+    if (server.stage !== "target" || !server.software.includes(softwareName)) {
+      throw new Error(`Scenario middleware package is not available on ${server.hostname}: ${softwareName}`);
+    }
+    if (environment.installedSoftware.includes(softwareName)) {
+      notify(`${softwareName} は既にインストールされています。`);
+      return;
+    }
+
+    const normalizedName = softwareName.toLowerCase();
+    const isResin = normalizedName.startsWith("resin ");
+    const isOracle = normalizedName.startsWith("oracle ");
+    if (isResin && server.role !== "application") throw new Error("ResinはAPサーバーにのみインストールできます。");
+    if (isOracle && server.role !== "database") throw new Error("Oracle DatabaseはDBサーバーにのみインストールできます。");
+    if (isResin && !environment.installedSoftware.some((item) => item.toLowerCase().startsWith("java "))) {
+      notify("Resinの前提条件が不足しています。先にJavaをインストールしてください。");
+      return;
+    }
+
+    const serviceDefinition = isResin
+      ? scenario.assets.services.find((service) => service.name.toLowerCase().includes("resin")
+        && scenario.assets.servers.find((item) => item.id === service.serverId)?.stage === "source")
+      : isOracle
+        ? scenario.assets.services.find((service) => service.serverId === serverId
+          && service.name.toLowerCase().startsWith("oracleservice"))
+        : undefined;
+    if (isResin && !serviceDefinition) throw new Error("Scenario Resin service definition is missing.");
+    if (isOracle && !serviceDefinition) throw new Error(`Scenario Oracle service definition is missing for ${server.hostname}.`);
+    const databaseVersion = isOracle
+      ? scenario.assets.databases.find((database) => database.serverId === serverId)?.version
+      : undefined;
+    if (isOracle && !databaseVersion) throw new Error(`Scenario Oracle version is missing for ${server.hostname}.`);
+
+    const addedService: RuntimeService | undefined = serviceDefinition
+      ? { ...serviceDefinition, id: `${serviceDefinition.id}-${serverId}-installed`, serverId, status: "stopped" }
+      : undefined;
+    setEnvironments((previous) => {
+      const current = previous[serverId];
+      if (!current) throw new Error(`Unknown server session: ${serverId}`);
+      return {
+        ...previous,
+        [serverId]: {
+          ...current,
+          installedSoftware: [...(current.installedSoftware ?? []), softwareName],
+          services: addedService
+            ? [...current.services.filter((service) => service.name !== addedService.name), addedService]
+            : current.services,
+          databaseVersion: databaseVersion ?? current.databaseVersion,
+        },
+      };
+    });
+    recordAuditEvent(`install:middleware:${serverId}:${softwareName}`);
+    notify(`${softwareName} をインストールしました。サービス構成を確認してください。`);
   };
 
   const recordBusinessWrite = (serverId: string) => {
@@ -838,6 +937,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                 onExport={exportAsset}
                 onImport={importAsset}
                 onServiceToggle={toggleService}
+                onSoftwareInstall={installMiddleware}
                 onDatabaseWrite={recordBusinessWrite}
                 onDnsDraftChange={setDnsDraft}
                 onDnsApply={() => {
@@ -1329,6 +1429,7 @@ function ServerSession({
   onExport,
   onImport,
   onServiceToggle,
+  onSoftwareInstall,
   onDatabaseWrite,
   onDnsDraftChange,
   onDnsApply,
@@ -1362,6 +1463,7 @@ function ServerSession({
   onExport: (serverId: string, kind: TransferPackage["kind"], content?: string) => void;
   onImport: (serverId: string) => void;
   onServiceToggle: (serverId: string, serviceId: string) => void;
+  onSoftwareInstall: (serverId: string, softwareName: string) => void;
   onDatabaseWrite: (serverId: string) => void;
   onDnsDraftChange: (dns: DnsRuntime) => void;
   onDnsApply: () => void;
@@ -1392,6 +1494,7 @@ function ServerSession({
         <div className="app-quickbar" aria-label="Windows管理ツール">
           <button className={app === "explorer" ? "quick-active" : ""} onClick={() => onOpenApp("explorer")} title="エクスプローラー"><FolderOpen size={14} /><span>Explorer</span></button>
           <button className={app === "services" ? "quick-active" : ""} onClick={() => onOpenApp("services")} title="サービス管理"><Settings size={14} /><span>サービス</span></button>
+          {server.stage === "target" && <button className={app === "setup" ? "quick-active" : ""} onClick={() => onOpenApp("setup")} title="ソフトウェア構成"><HardDrive size={14} /><span>セットアップ</span></button>}
           <button className={app === "tasks" ? "quick-active" : ""} onClick={() => onOpenApp("tasks")} title="タスク スケジューラ"><ListTodo size={14} /><span>タスク</span></button>
           <button className={app === "certificates" ? "quick-active" : ""} onClick={() => onOpenApp("certificates")} title="証明書"><FileKey2 size={14} /><span>証明書</span></button>
           <button className={app === "events" ? "quick-active" : ""} onClick={() => onOpenApp("events")} title="イベント ビューアー"><FileText size={14} /><span>イベント</span></button>
@@ -1417,6 +1520,7 @@ function ServerSession({
             onExport={onExport}
             onImport={onImport}
             onServiceToggle={onServiceToggle}
+            onSoftwareInstall={onSoftwareInstall}
             onDatabaseWrite={onDatabaseWrite}
             onDnsDraftChange={onDnsDraftChange}
             onDnsApply={onDnsApply}
@@ -1459,6 +1563,7 @@ function ManagerWindow({
   onExport,
   onImport,
   onServiceToggle,
+  onSoftwareInstall,
   onDatabaseWrite,
   onDnsDraftChange,
   onDnsApply,
@@ -1482,6 +1587,7 @@ function ManagerWindow({
   onExport: (serverId: string, kind: TransferPackage["kind"], content?: string) => void;
   onImport: (serverId: string) => void;
   onServiceToggle: (serverId: string, serviceId: string) => void;
+  onSoftwareInstall: (serverId: string, softwareName: string) => void;
   onDatabaseWrite: (serverId: string) => void;
   onDnsDraftChange: (dns: DnsRuntime) => void;
   onDnsApply: () => void;
@@ -1491,7 +1597,16 @@ function ManagerWindow({
   onTaskRun: (taskId: string) => void;
   onNotify: (message: string) => void;
 }) {
-  const canImport = transfer?.kind === appTransferKind(app) && transfer.sourceServerId !== server.id;
+  const canImport = transfer?.kind === appTransferKind(app)
+    && transfer.sourceServerId !== server.id
+    && (transfer.kind !== "database" || (
+      Boolean(environment.databaseVersion)
+      && environment.services.some((service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running")
+    ))
+    && (transfer.kind !== "services" || server.stage !== "target"
+      || environment.installedSoftware.some((software) =>
+        software.toLowerCase().startsWith(server.role === "application" ? "resin " : "oracle "),
+      ));
   const dbSchemas = environment.databaseSchemas;
   const targetDatabase = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "target");
   const targetDatabaseInfo = scenario.assets.databases.find((item) => item.serverId === targetDatabase?.id);
@@ -1507,6 +1622,25 @@ function ManagerWindow({
         <div className="manager-toolbar service-columns"><span>名前</span><span>状態</span><span>起動種類</span><span>実行ユーザー</span><span>操作</span></div>
         {environment.services.length ? environment.services.map((service) => <div className="manager-row service-columns" key={service.id}><div className="manager-primary"><Settings size={14} /><span><strong>{service.displayName}</strong><small>{service.name}</small></span></div><span className={`service-state ${service.status}`}>{service.status === "running" ? "実行中" : "停止"}</span><span className="table-muted">{service.startupType === "automatic" ? "自動" : "手動"}</span><span className="table-muted">{service.runAs}</span><button className="row-action" onClick={() => onServiceToggle(server.id, service.id)}><Power size={12} />{service.status === "running" ? "停止" : "開始"}</button></div>) : <EmptyManager text="サービスは見つかりませんでした。" /> }
         <div className="manager-bottom-actions"><span>{environment.services.length} 個のサービス</span><ManagerTransfer kind="services" source={environment.services.length > 0} canImport={canImport} onExport={() => onExport(server.id, "services")} onImport={() => onImport(server.id)} /></div>
+      </ManagerFrame>}
+
+      {app === "setup" && <ManagerFrame title={`ソフトウェア構成 - ${server.hostname}`} icon={<HardDrive size={15} />}>
+        <p className="migration-instruction">このサーバーに必要なミドルウェアを導入します。導入後、サービス管理でサービスを起動してください。</p>
+        <div className="middleware-list">
+          {server.software.map((software) => {
+            const installed = environment.installedSoftware.includes(software);
+            const requiresJava = software.toLowerCase().startsWith("resin ");
+            const hasJava = environment.installedSoftware.some((item) => item.toLowerCase().startsWith("java "));
+            return <div className="middleware-row" key={software}>
+              <div><strong>{software}</strong><small>{installed ? "インストール済み" : requiresJava && !hasJava ? "前提条件: Java" : "未インストール"}</small></div>
+              <button className={installed ? "installed" : "manager-primary-button"} disabled={installed || (requiresJava && !hasJava)} onClick={() => onSoftwareInstall(server.id, software)}>
+                {installed ? <><Check size={13} />導入済み</> : "インストール"}
+              </button>
+            </div>;
+          })}
+          {!server.software.length && <EmptyManager text="このシナリオに導入対象のソフトウェアはありません。" />}
+        </div>
+        <div className="middleware-note">Java → Resinの順で導入し、Resin / Oracleはサービスを起動して待受状態を確認します。</div>
       </ManagerFrame>}
 
       {app === "explorer" && <ManagerFrame title={`エクスプローラー - ${server.hostname}`} icon={<FolderOpen size={15} />}>
@@ -1563,6 +1697,9 @@ function ManagerWindow({
 
       {app === "database" && <ManagerFrame title={`SQL*Plus — ${server.hostname}`} icon={<Database size={15} />}>
         <div className="database-console"><span>SQL*Plus: Release {environment.databaseVersion ?? "未インストール"} - Production</span><span>Connected to:</span><strong>Oracle Database {environment.databaseVersion ?? "未インストール"}</strong><span>接続先: {server.hostname}</span></div>
+        {server.stage === "target" && (!environment.databaseVersion
+          || !environment.services.some((service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running"))
+          && <p className="migration-instruction">{environment.databaseVersion ? "Oracleサービスが停止しています。Data Pumpを実行する前にservices.mscで起動してください。" : "Oracle Databaseが未導入です。セットアップからインストールし、services.mscでOracleサービスを起動してください。"}</p>}
         <div className="database-schema-title"><strong>ユーザースキーマ</strong><span>{dbSchemas.length} 件</span></div>
         {dbSchemas.length ? <div className="schema-list">{dbSchemas.map((schemaName) => <span key={schemaName}><Database size={13} />{schemaName}<i>VALID</i></span>)}</div> : <EmptyManager text="ユーザースキーマがありません。" />}
         <div className={`database-revision ${dataBehind ? "behind" : ""}`}>
@@ -1608,6 +1745,7 @@ function appTransferKind(app: ManagerApp): TransferPackage["kind"] | null {
 
 function managerTitle(app: ManagerApp): string {
   const titles: Record<ManagerApp, string> = {
+    setup: "ソフトウェア構成",
     services: "サービス",
     tasks: "タスク スケジューラ",
     certificates: "証明書",

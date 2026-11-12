@@ -50,8 +50,10 @@ export function createRuntimeEnvironments(scenario: Scenario): RuntimeEnvironmen
     scenario.assets.servers.map((server) => [
       server.id,
       {
+        installedSoftware: server.stage === "target" ? [] : [...server.software],
         services: scenario.assets.services
           .filter((service) => service.serverId === server.id)
+          .filter(() => server.stage !== "target")
           .map((service) => ({ ...service, status: "running" as const })),
         tasks: scenario.assets.tasks.filter((task) => task.serverId === server.id),
         certificates: scenario.assets.certificates.filter((certificate) => certificate.serverId === server.id),
@@ -59,8 +61,12 @@ export function createRuntimeEnvironments(scenario: Scenario): RuntimeEnvironmen
         jdbcProperties: server.role === "application" && server.stage === "source" && sourceDatabase && sourceServiceName
           ? `jdbc.url=jdbc:oracle:thin:@${sourceDatabase.hostname}:${sourceDatabasePort}:${sourceServiceName}\njdbc.user=IMART\njdbc.******`
           : null,
-        databaseVersion: scenario.assets.databases.find((database) => database.serverId === server.id)?.version ?? null,
-        databaseSchemas: scenario.assets.databases.find((database) => database.serverId === server.id)?.schemas ?? [],
+        databaseVersion: server.stage === "target"
+          ? null
+          : scenario.assets.databases.find((database) => database.serverId === server.id)?.version ?? null,
+        databaseSchemas: server.stage === "target"
+          ? []
+          : scenario.assets.databases.find((database) => database.serverId === server.id)?.schemas ?? [],
         databaseRevision: 0,
       } satisfies RuntimeEnvironment,
     ]),
@@ -101,6 +107,7 @@ export function createExpertRuntimeEnvironments(scenario: Scenario, incidentId: 
 
   const migratedApplication: RuntimeEnvironment = {
     ...targetApplicationEnvironment,
+    installedSoftware: [...targetApplication.software],
     services: sourceApplicationEnvironment.services.map((service) => ({
       ...service,
       serverId: targetApplication.id,
@@ -123,6 +130,11 @@ export function createExpertRuntimeEnvironments(scenario: Scenario, incidentId: 
   environments[targetApplication.id] = migratedApplication;
   environments[targetDatabase.id] = {
     ...targetDatabaseEnvironment,
+    installedSoftware: [...targetDatabase.software],
+    services: scenario.assets.services
+      .filter((service) => service.serverId === targetDatabase.id)
+      .map((service) => ({ ...service, status: "running" as const })),
+    databaseVersion: scenario.assets.databases.find((database) => database.serverId === targetDatabase.id)?.version ?? null,
     databaseSchemas: [...sourceDatabaseEnvironment.databaseSchemas],
     databaseRevision: sourceDatabaseEnvironment.databaseRevision,
   };
@@ -177,7 +189,7 @@ export function runCommand(
   if (normalized === "ver") return { output: [`Microsoft Windows [Version ${server.operatingSystem.includes("2019") ? "10.0.17763.0" : "10.0.14393.0"}]`] };
   if (normalized === "systeminfo") return { output: systemInfo(server, scenario) };
   if (normalized === "java -version") {
-    const java = server.software.find((item) => item.toLowerCase().startsWith("java "));
+    const java = environment.installedSoftware.find((item) => item.toLowerCase().startsWith("java "));
     return java
       ? { output: [`java version "${java.slice(5)}"`, "Java(TM) SE Runtime Environment", "Java HotSpot(TM) 64-Bit Server VM"] }
       : { output: ["'java' is not recognized as an internal or external command,", "operable program or batch file."] };
@@ -247,16 +259,38 @@ export function runCommand(
       (service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running",
     );
     const database = scenario.assets.databases.find((item) => item.serverId === server.id);
+    if (!environment.databaseVersion) {
+      return { output: ["'lsnrctl' is not recognized as an internal or external command,", "operable program or batch file."] };
+    }
+    if (!hasRunningOracleService) {
+      return { output: ["TNS-12541: TNS:no listener", "The listener is not running."] };
+    }
     return {
       output: [
         `LSNRCTL for ${environment.databaseVersion ?? "Oracle"} - Production`,
         `Connecting to (HOST=${server.hostname})(PORT=1521)`,
         "STATUS of the LISTENER",
-        ...(hasRunningOracleService
-          ? [`Service "${database?.serviceName ?? server.hostname}" has 1 instance(s).`, `  Instance "${database?.serviceName ?? server.hostname}", status READY`]
-          : ["The listener supports no services"]),
+        `Service "${database?.serviceName ?? server.hostname}" has 1 instance(s).`,
+        `  Instance "${database?.serviceName ?? server.hostname}", status READY`,
       ],
     };
+  }
+  if (
+    server.role === "database"
+    && !environment.databaseVersion
+    && (normalized.startsWith("sqlplus") || normalized.startsWith("expdp") || normalized.startsWith("impdp"))
+  ) {
+    return { output: ["Oracle Database is not installed. Run the scenario installer before using SQL*Plus or Data Pump."] };
+  }
+  if (
+    server.role === "database"
+    && environment.databaseVersion
+    && !environment.services.some((service) =>
+      service.name.toLowerCase().startsWith("oracleservice") && service.status === "running",
+    )
+    && (normalized.startsWith("sqlplus") || normalized.startsWith("expdp") || normalized.startsWith("impdp"))
+  ) {
+    return { output: ["ORA-12541: TNS:no listener", "Start the Oracle service before using SQL*Plus or Data Pump."] };
   }
   if (args[0] === "tnsping") {
     const database = scenario.assets.servers.find((item) => item.hostname.toLowerCase() === args[1]);
@@ -437,6 +471,9 @@ function findScenarioCommand(command: string, scenario: Scenario): CommandOutput
 }
 
 function managerForCommand(command: string, server: Server): { app: ManagerApp; displayName: string } | null {
+  if ((command === "appwiz.cpl" || command === "servermanager") && server.stage === "target") {
+    return { app: "setup", displayName: "プログラムと機能" };
+  }
   if (command === "services.msc") return { app: "services", displayName: "Services" };
   if (command === "taskschd.msc") return { app: "tasks", displayName: "Task Scheduler" };
   if (command === "certlm.msc") return { app: "certificates", displayName: "Certificates - Local Computer" };
@@ -491,7 +528,11 @@ function ipConfig(server: Server, scenario: Scenario): string[] {
 function netstat(server: Server, scenario: Scenario, environment: RuntimeEnvironment): string[] {
   const result = ["Active Connections", "", "  Proto  Local Address          Foreign Address        State"];
   if (server.role === "database") {
-    result.push(`  TCP    0.0.0.0:1521           0.0.0.0:0              LISTENING`);
+    const listenerRunning = environment.databaseVersion
+      && environment.services.some((service) =>
+        service.name.toLowerCase().startsWith("oracleservice") && service.status === "running",
+      );
+    if (listenerRunning) result.push("  TCP    0.0.0.0:1521           0.0.0.0:0              LISTENING");
   } else if (server.role === "dns") {
     result.push("  UDP    0.0.0.0:53             *:*");
   } else {
@@ -567,6 +608,7 @@ const helpText = [
   "hostname     systeminfo     ipconfig [/all | /flushdns]",
   "netstat [-ano]     nslookup [host]     ping host     route print",
   "services.msc     taskschd.msc     certlm.msc",
+  "appwiz.cpl     (target server software setup)",
   "eventvwr.msc     dnsmgmt.msc     sqlplus / as sysdba",
   "expdp     impdp     lsnrctl status     tnsping alias",
   "java -version     curl http://APSV02:8080/     notepad jdbc.properties",
