@@ -1,0 +1,59 @@
+{
+  "id": "windows-server-2016-to-2019",
+  "title": "基幹業務システム サーバー更改",
+  "description": "稼働中のintra-mart環境を止めずに、新しいWindows Server 2019基盤へ移行せよ。",
+  "phases": [
+    { "id": "investigation", "title": "現行調査", "shortTitle": "現行調査", "objective": "コマンドを実行し、現行のサーバー・ネットワーク・接続関係を把握する。" },
+    { "id": "architecture", "title": "構成把握", "shortTitle": "構成把握", "objective": "AP、DB、DNSの役割と接続経路を正しく特定する。" },
+    { "id": "build", "title": "新環境構築", "shortTitle": "環境構築", "objective": "互換性を考慮して新しいAPサーバー環境を選定する。" },
+    { "id": "database-migration", "title": "DB移行", "shortTitle": "DB移行", "objective": "停止時間・工数・リスクを比較してDB移行方式を決める。" },
+    { "id": "application-migration", "title": "AP移行", "shortTitle": "AP移行", "objective": "アプリケーションの実行に必要な設定と資産を移行する。" },
+    { "id": "cutover", "title": "本番切替", "shortTitle": "本番切替", "objective": "最終同期後、TTLを考慮してDNSとサービスを切り替える。" },
+    { "id": "incident-response", "title": "障害対応", "shortTitle": "障害対応", "objective": "ログから原因を特定し、影響を抑えながら復旧する。" }
+  ],
+  "assets": {
+    "servers": [
+      { "id": "ap-old", "hostname": "APSV01", "role": "application", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },
+      { "id": "db-old", "hostname": "DBSV01", "role": "database", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.31", "software": ["Oracle 11g", "Listener"], "vmIds": ["vm-db-old"] },
+      { "id": "dns-01", "hostname": "DNS01", "role": "dns", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.10", "software": ["DNS Server"], "vmIds": [] },
+      { "id": "ap-new", "hostname": "APSV02", "role": "application", "operatingSystem": "Windows Server 2019", "ipAddress": "10.10.2.21", "software": [], "vmIds": ["vm-ap-new"] },
+      { "id": "db-new", "hostname": "DBSV02", "role": "database", "operatingSystem": "Windows Server 2019", "ipAddress": "10.10.2.31", "software": ["Oracle 19c"], "vmIds": ["vm-db-new"] }
+    ],
+    "vms": [
+      { "id": "vm-ap-old", "name": "VM-AP-PRD01", "hostServerId": "ap-old", "vcpu": 4, "memoryGb": 16, "status": "running" },
+      { "id": "vm-db-old", "name": "VM-DB-PRD01", "hostServerId": "db-old", "vcpu": 8, "memoryGb": 32, "status": "running" },
+      { "id": "vm-ap-new", "name": "VM-AP-NEW01", "hostServerId": "ap-new", "vcpu": 4, "memoryGb": 16, "status": "planned" },
+      { "id": "vm-db-new", "name": "VM-DB-NEW01", "hostServerId": "db-new", "vcpu": 8, "memoryGb": 32, "status": "planned" }
+    ],
+    "databases": [
+      { "id": "oracle-prod", "serverId": "db-old", "product": "Oracle Database", "version": "11.2.0.4", "schemas": ["IMART", "BATCH"], "listenerPort": 1521 }
+    ],
+    "dns": [
+      { "id": "service-dns", "name": "intra.example.local", "recordType": "A", "address": "10.10.1.21", "ttlSeconds": 86400 }
+    ],
+    "services": [
+      { "id": "resin-service", "name": "Resin", "displayName": "Resin Web Server", "serverId": "ap-old", "startupType": "automatic" },
+      { "id": "oracle-service", "name": "OracleServiceORCL", "displayName": "Oracle Database Service", "serverId": "db-old", "startupType": "automatic" }
+    ],
+    "tasks": [
+      { "id": "excel-export", "name": "DailyExcelExport", "serverId": "ap-old", "schedule": "毎日 02:00", "executable": "C:\\imart\\batch\\export.bat" }
+    ]
+  },
+  "commands": [
+    { "command": "hostname", "title": "ホスト名", "output": ["APSV01"], "insight": "接続先は現行APサーバーです。" },
+    { "command": "systeminfo", "title": "OS・システム情報", "output": ["ホスト名: APSV01", "OS 名: Microsoft Windows Server 2016 Standard", "システムの種類: x64-based PC", "システム起動時間: 2024/03/01 08:32"], "insight": "OSのバージョンと稼働時間は移行計画の基礎情報です。" },
+    { "command": "ipconfig /all", "title": "ネットワーク設定", "output": ["Ethernet adapter 本番LAN:", "   IPv4 アドレス: 10.10.1.21", "   サブネット マスク: 255.255.255.0", "   DNS サーバー: 10.10.1.10"], "insight": "DNSサーバーと現行IPを記録し、新旧ネットワークの差分を確認しましょう。" },
+    { "command": "netstat -ano", "title": "接続・待受ポート", "output": ["TCP  0.0.0.0:8080    0.0.0.0:0      LISTENING", "TCP  10.10.1.21:1521 10.10.1.31:53122 ESTABLISHED", "TCP  0.0.0.0:443     0.0.0.0:0      LISTENING"], "insight": "8080/443のAP待受と、DBの1521番ポートへの接続が確認できます。" },
+    { "command": "nslookup intra.example.local", "title": "DNS名前解決", "output": ["Server:  DNS01.example.local", "Address: 10.10.1.10", "", "Name:    intra.example.local", "Address: 10.10.1.21"], "insight": "本番FQDNは現行APサーバーを指しています。AレコードとTTLを切替計画に含めます。" },
+    { "command": "services.msc", "title": "Windowsサービス", "output": ["Resin Web Server      実行中 / 自動", "OracleServiceORCL     実行中 / 自動"], "insight": "サービス名と起動設定を新環境に引き継ぐ必要があります。" },
+    { "command": "taskschd.msc", "title": "タスクスケジューラ", "output": ["DailyExcelExport      毎日 02:00 / C:\\imart\\batch\\export.bat"], "insight": "定期バッチの移行漏れは、帳票やExcel出力の停止につながります。" },
+    { "command": "certlm.msc", "title": "SSL証明書", "output": ["CN=intra.example.local", "有効期限: 2027/06/30", "秘密キー: エクスポート可能"], "insight": "証明書だけでなく、秘密鍵を含めて安全に移行する必要があります。" }
+  ],
+  "incidents": [
+    { "id": "https-certificate", "title": "HTTPS証明書エラー", "description": "利用者のブラウザーに証明書警告が表示されます。", "cause": "秘密鍵を含むSSL証明書が新APサーバーに移行されていません。", "requiredAsset": "certificate", "logs": ["[ERROR] SSL: private key not found for intra.example.local", "[WARN] HTTPS listener failed to initialize"], "repairAction": "certificate", "repairLabel": "秘密鍵を含む証明書をインポートする" },
+    { "id": "jdbc-connection", "title": "DB接続エラー", "description": "アプリケーションがデータベースへ接続できません。", "cause": "JDBC接続先が旧DBサーバーのままです。", "requiredAsset": "jdbc", "logs": ["[ERROR] JDBC-1001: Connection refused", "[INFO] URL=jdbc:oracle:thin:@DBSV01:1521:ORCL"], "repairAction": "jdbc", "repairLabel": "JDBC接続先を新DBに変更する" },
+    { "id": "batch-task", "title": "定期Excel出力停止", "description": "深夜のExcel出力バッチが実行されていません。", "cause": "タスクスケジューラのDailyExcelExportが新APサーバーに移行されていません。", "requiredAsset": "task", "logs": ["[ERROR] Scheduled task DailyExcelExport was not found", "[WARN] Last successful run: yesterday 02:00"], "repairAction": "task", "repairLabel": "タスクスケジューラ設定を移行する" },
+    { "id": "resin-service", "title": "APサービス起動失敗", "description": "DNS切替後、アプリケーションにアクセスできません。", "cause": "Resin Windowsサービスの起動設定が未確認です。", "requiredAsset": "service", "logs": ["[ERROR] Service Resin is stopped", "[INFO] Startup type: Manual"], "repairAction": "service", "repairLabel": "Resinサービスを自動起動に設定する" }
+  ],
+  "advisorContext": "新人SE向けのWindows Server更改案件。停止時間と変更リスクのトレードオフを説明し、次に確認すべき現場の観点を短く提案する。秘密情報や資格情報の入力は求めない。"
+}

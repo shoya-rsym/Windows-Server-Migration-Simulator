@@ -1,1 +1,69 @@
-# Windows-Server-Migration-Simulator
+# Windows Server Migration Simulator
+
+Windows Server 2016 / Oracle 11g から Windows Server 2019 / Oracle 19c への更改を題材にした、日本語の教育シミュレーションSPAです。
+
+## 設計
+
+### ディレクトリ構成
+
+```text
+src/
+  components/       共通レイアウト・UI部品
+  data/             JSONシナリオ
+  domain/           サーバー資産モデル、状態遷移、採点
+  App.tsx           フェーズ画面とプレイヤー操作
+  main.tsx          SPAエントリーポイント
+  styles.css        Tailwindとアプリ固有スタイル
+```
+
+シナリオデータは `src/data/scenarios/` に置き、`Scenario` 型を満たすJSONを追加して登録するだけで案件を追加できます。シミュレーションの遷移・採点と表示を分離しているため、将来のAIアドバイスは `Advisor` インターフェースを実装して差し替えられます。初期版はブラウザー内で完結し、バックエンドや外部AIサービスを必要としません。
+
+### ドメインモデル
+
+- `Server` は役割、OS、IP、インストール済みソフトウェア、関連VMを持ちます。
+- `VM` はホスト、割当リソース、環境ステータスを表します。
+- `Database` は製品・バージョン・スキーマ・接続状態を表します。
+- `DNS` は名前、Aレコード、TTLを持ち、切替時の反映遅延を評価します。
+- `Service` と `Task` は Windows サービスとタスクスケジューラの移行対象です。
+
+### 画面設計
+
+1. **プロジェクト概要** — 進捗、稼働時間、成功率、スコアを常時表示。
+2. **フェーズナビゲーション** — Phase 1〜7の進行状況とロック状態。
+3. **作業エリア** — フェーズごとの調査端末、構成確認、構築設定、DB方式、移行チェックリスト、切替手順、障害対応を表示。
+4. **イベントログ** — 調査結果、意思決定、障害発生と復旧履歴を時系列表示。
+5. **スコアカード** — 構成理解20点、移行成功率40点、停止時間20点、障害対応20点を合計100点で採点。
+
+### 状態遷移
+
+`investigation → architecture → build → database-migration → application-migration → cutover → incident-response → completed`
+
+各フェーズの必須条件を満たすと次へ進めます。前フェーズには戻れますが、完了済み操作は保持します。移行選択はリスク・工数・停止時間に反映し、切替時には設定漏れを根拠とする障害イベントを選出します。障害はログと原因ヒントを使って診断・修復し、誤った対応には追加の停止時間が加算されます。
+
+### シナリオJSON仕様
+
+必須トップレベル項目:
+
+| 項目 | 説明 |
+|---|---|
+| `id`, `title`, `description` | 識別子と案件概要 |
+| `phases` | 7フェーズの名前・目的 |
+| `assets` | サーバー、VM、DB、DNS、サービス、タスク |
+| `commands` | 調査コマンドごとの疑似出力 |
+| `incidents` | 発生条件、ログ、原因、修復アクション |
+| `advisorContext` | 将来のAIアドバイザーに渡す案件情報 |
+
+JSONの実例は `src/data/scenarios/windows-server-2016-to-2019.json` を参照してください。TypeScriptの `Scenario` 型でロード時にデータ形状を確認します。
+
+## 起動方法
+
+```bash
+npm install
+npm run dev
+```
+
+## 検証
+
+```bash
+npm run build
+```
