@@ -1,13 +1,45 @@
-export type PhaseId =
-  | "investigation"
-  | "architecture"
-  | "build"
-  | "database-migration"
-  | "application-migration"
-  | "cutover"
-  | "incident-response";
-
 export type AssetRole = "application" | "database" | "dns";
+export type EnvironmentStage = "source" | "target" | "infrastructure";
+export type DifficultyMode = "tutorial" | "beginner" | "intermediate" | "advanced";
+export type DeploymentProvider = "onprem" | "aws" | "azure";
+
+export interface LearningObjective {
+  id: string;
+  title: string;
+  serverRole: AssetRole;
+  commands: string[];
+  tutorialInstruction: string;
+  beginnerInstruction: string;
+  explanation: string;
+}
+
+export interface AuditCheck {
+  id: string;
+  title: string;
+  requiredEvents: string[];
+  operationGuidance: string[];
+  remediation: string;
+  impact: string;
+  weight: number;
+}
+
+export interface TutorialStep {
+  id: string;
+  instruction: string;
+  requiredEvents: string[];
+  explanation: string;
+}
+
+export type ManagerApp =
+  | "services"
+  | "tasks"
+  | "certificates"
+  | "events"
+  | "dns"
+  | "notepad"
+  | "resinConfig"
+  | "explorer"
+  | "database";
 
 export interface VM {
   id: string;
@@ -22,6 +54,7 @@ export interface Server {
   id: string;
   hostname: string;
   role: AssetRole;
+  stage: EnvironmentStage;
   operatingSystem: string;
   ipAddress: string;
   software: string[];
@@ -33,6 +66,7 @@ export interface Database {
   serverId: string;
   product: string;
   version: string;
+  serviceName: string;
   schemas: string[];
   listenerPort: number;
 }
@@ -51,6 +85,11 @@ export interface Service {
   displayName: string;
   serverId: string;
   startupType: "automatic" | "manual";
+  runAs: string;
+}
+
+export interface RuntimeService extends Service {
+  status: "running" | "stopped";
 }
 
 export interface Task {
@@ -59,13 +98,25 @@ export interface Task {
   serverId: string;
   schedule: string;
   executable: string;
+  runAs: string;
 }
 
-export interface PhaseDefinition {
-  id: PhaseId;
-  title: string;
-  shortTitle: string;
-  objective: string;
+export interface Certificate {
+  id: string;
+  serverId: string;
+  store: "personal" | "intermediate" | "trustedRoot";
+  subject: string;
+  issuer: string;
+  expiresOn: string;
+  hasPrivateKey: boolean;
+}
+
+export interface ConfigFile {
+  id: string;
+  name: string;
+  serverId: string;
+  path: string;
+  content: string;
 }
 
 export interface CommandOutput {
@@ -90,7 +141,6 @@ export interface Scenario {
   id: string;
   title: string;
   description: string;
-  phases: PhaseDefinition[];
   assets: {
     servers: Server[];
     vms: VM[];
@@ -98,51 +148,57 @@ export interface Scenario {
     dns: DNS[];
     services: Service[];
     tasks: Task[];
+    certificates: Certificate[];
+    configurationFiles: ConfigFile[];
   };
   commands: CommandOutput[];
   incidents: IncidentDefinition[];
+  learningObjectives: LearningObjective[];
+  learningOrderByMode: Record<DifficultyMode, string[]>;
+  tutorialSteps: TutorialStep[];
+  auditChecks: AuditCheck[];
+  recommendedOrder: string[];
   advisorContext: string;
 }
 
-export interface GameState {
-  currentPhase: PhaseId;
-  completedPhases: PhaseId[];
-  commandOutputs: string[];
-  architectureAnswer: string | null;
-  buildOptions: {
-    operatingSystem: string;
-    javaVersion: string;
-    resinVersion: string;
-  };
-  databaseMethod: string | null;
-  migratedAssets: string[];
-  cutover: {
-    finalSync: boolean;
-    ttlMinutes: number;
-    dnsSwitched: boolean;
-    servicesSwitched: boolean;
-  };
-  activeIncident: IncidentDefinition | null;
-  incidentSolved: boolean;
-  incidentAttempted: boolean;
-  downtimeMinutes: number;
-  migrationSuccess: number;
-  riskPoints: number;
-  eventLog: string[];
+export interface RuntimeEnvironment {
+  services: RuntimeService[];
+  tasks: Task[];
+  certificates: Certificate[];
+  configurationFiles: ConfigFile[];
+  jdbcProperties: string | null;
+  databaseVersion: string | null;
+  databaseSchemas: string[];
 }
 
-export interface ScoreBreakdown {
-  architecture: number;
-  migration: number;
-  downtime: number;
-  incidentResponse: number;
-  total: number;
+export type RuntimeEnvironments = Record<string, RuntimeEnvironment>;
+
+export type TransferPackage =
+  | { kind: "services"; sourceServerId: string; items: RuntimeService[] }
+  | { kind: "tasks"; sourceServerId: string; items: Task[] }
+  | { kind: "certificates"; sourceServerId: string; items: Certificate[] }
+  | { kind: "configFile"; sourceServerId: string; items: ConfigFile[] }
+  | { kind: "jdbc"; sourceServerId: string; content: string }
+  | { kind: "database"; sourceServerId: string; schemas: string[] };
+
+export interface ConsoleEntry {
+  id: number;
+  command: string;
+  output: string[];
+  isError?: boolean;
+}
+
+export interface HypothesisNote {
+  id: number;
+  text: string;
+  status: "open" | "confirmed" | "rejected";
 }
 
 export interface AdvisorContext {
   scenario: Scenario;
-  state: GameState;
-  score: ScoreBreakdown;
+  server: Server;
+  recentCommands: ConsoleEntry[];
+  hypotheses: HypothesisNote[];
 }
 
 export interface Advisor {

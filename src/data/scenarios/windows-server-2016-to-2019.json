@@ -1,23 +1,14 @@
 {
   "id": "windows-server-2016-to-2019",
   "title": "基幹業務システム サーバー更改",
-  "description": "稼働中のintra-mart環境を止めずに、新しいWindows Server 2019基盤へ移行せよ。",
-  "phases": [
-    { "id": "investigation", "title": "現行調査", "shortTitle": "現行調査", "objective": "コマンドを実行し、現行のサーバー・ネットワーク・接続関係を把握する。" },
-    { "id": "architecture", "title": "構成把握", "shortTitle": "構成把握", "objective": "AP、DB、DNSの役割と接続経路を正しく特定する。" },
-    { "id": "build", "title": "新環境構築", "shortTitle": "環境構築", "objective": "互換性を考慮して新しいAPサーバー環境を選定する。" },
-    { "id": "database-migration", "title": "DB移行", "shortTitle": "DB移行", "objective": "停止時間・工数・リスクを比較してDB移行方式を決める。" },
-    { "id": "application-migration", "title": "AP移行", "shortTitle": "AP移行", "objective": "アプリケーションの実行に必要な設定と資産を移行する。" },
-    { "id": "cutover", "title": "本番切替", "shortTitle": "本番切替", "objective": "最終同期後、TTLを考慮してDNSとサービスを切り替える。" },
-    { "id": "incident-response", "title": "障害対応", "shortTitle": "障害対応", "objective": "ログから原因を特定し、影響を抑えながら復旧する。" }
-  ],
+  "description": "稼働中の業務システムを新しいサーバー環境へ移行し、本番切替後もサービスを継続する。",
   "assets": {
     "servers": [
-      { "id": "ap-old", "hostname": "APSV01", "role": "application", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },
-      { "id": "db-old", "hostname": "DBSV01", "role": "database", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.31", "software": ["Oracle 11g", "Listener"], "vmIds": ["vm-db-old"] },
-      { "id": "dns-01", "hostname": "DNS01", "role": "dns", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.10", "software": ["DNS Server"], "vmIds": [] },
-      { "id": "ap-new", "hostname": "APSV02", "role": "application", "operatingSystem": "Windows Server 2019", "ipAddress": "10.10.2.21", "software": [], "vmIds": ["vm-ap-new"] },
-      { "id": "db-new", "hostname": "DBSV02", "role": "database", "operatingSystem": "Windows Server 2019", "ipAddress": "10.10.2.31", "software": ["Oracle 19c"], "vmIds": ["vm-db-new"] }
+      { "id": "ap-old", "hostname": "APSV01", "role": "application", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },
+      { "id": "db-old", "hostname": "DBSV01", "role": "database", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.31", "software": ["Oracle 11g", "Listener"], "vmIds": ["vm-db-old"] },
+      { "id": "dns-01", "hostname": "DNS01", "role": "dns", "stage": "infrastructure", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.10", "software": ["DNS Server"], "vmIds": [] },
+      { "id": "ap-new", "hostname": "APSV02", "role": "application", "stage": "target", "operatingSystem": "Windows Server 2019", "ipAddress": "10.10.2.21", "software": ["Java 8", "Resin 4.0"], "vmIds": ["vm-ap-new"] },
+      { "id": "db-new", "hostname": "DBSV02", "role": "database", "stage": "target", "operatingSystem": "Windows Server 2019", "ipAddress": "10.10.2.31", "software": ["Oracle 19c"], "vmIds": ["vm-db-new"] }
     ],
     "vms": [
       { "id": "vm-ap-old", "name": "VM-AP-PRD01", "hostServerId": "ap-old", "vcpu": 4, "memoryGb": 16, "status": "running" },
@@ -26,17 +17,27 @@
       { "id": "vm-db-new", "name": "VM-DB-NEW01", "hostServerId": "db-new", "vcpu": 8, "memoryGb": 32, "status": "planned" }
     ],
     "databases": [
-      { "id": "oracle-prod", "serverId": "db-old", "product": "Oracle Database", "version": "11.2.0.4", "schemas": ["IMART", "BATCH"], "listenerPort": 1521 }
+      { "id": "oracle-prod", "serverId": "db-old", "product": "Oracle Database", "version": "11.2.0.4", "serviceName": "ORCL", "schemas": ["IMART", "BATCH"], "listenerPort": 1521 },
+      { "id": "oracle-target", "serverId": "db-new", "product": "Oracle Database", "version": "19.20.0.0", "serviceName": "ORCL", "schemas": [], "listenerPort": 1521 }
     ],
     "dns": [
       { "id": "service-dns", "name": "intra.example.local", "recordType": "A", "address": "10.10.1.21", "ttlSeconds": 86400 }
     ],
     "services": [
-      { "id": "resin-service", "name": "Resin", "displayName": "Resin Web Server", "serverId": "ap-old", "startupType": "automatic" },
-      { "id": "oracle-service", "name": "OracleServiceORCL", "displayName": "Oracle Database Service", "serverId": "db-old", "startupType": "automatic" }
+      { "id": "resin-service", "name": "Resin", "displayName": "Resin Web Server", "serverId": "ap-old", "startupType": "automatic", "runAs": "LocalSystem" },
+      { "id": "oracle-service", "name": "OracleServiceORCL", "displayName": "Oracle Database Service", "serverId": "db-old", "startupType": "automatic", "runAs": "LocalSystem" },
+      { "id": "oracle-service-new", "name": "OracleServiceORCL", "displayName": "Oracle Database Service", "serverId": "db-new", "startupType": "automatic", "runAs": "LocalSystem" }
     ],
     "tasks": [
-      { "id": "excel-export", "name": "DailyExcelExport", "serverId": "ap-old", "schedule": "毎日 02:00", "executable": "C:\\imart\\batch\\export.bat" }
+      { "id": "excel-export", "name": "DailyExcelExport", "serverId": "ap-old", "schedule": "毎日 02:00", "executable": "C:\\imart\\batch\\export.bat", "runAs": "EXAMPLE\\svc_batch" }
+    ],
+    "certificates": [
+      { "id": "intra-tls", "serverId": "ap-old", "store": "personal", "subject": "CN=intra.example.local", "issuer": "Example Enterprise CA", "expiresOn": "2027/06/30", "hasPrivateKey": true },
+      { "id": "issuing-ca", "serverId": "ap-old", "store": "intermediate", "subject": "CN=Example Enterprise Issuing CA", "issuer": "Example Enterprise Root CA", "expiresOn": "2032/01/01", "hasPrivateKey": false },
+      { "id": "root-ca", "serverId": "ap-old", "store": "trustedRoot", "subject": "CN=Example Enterprise Root CA", "issuer": "Example Enterprise Root CA", "expiresOn": "2035/01/01", "hasPrivateKey": false }
+    ],
+    "configurationFiles": [
+      { "id": "resin-main", "name": "resin.conf", "serverId": "ap-old", "path": "C:\\resin\\conf\\resin.conf", "content": "<server port='8080' address='10.10.1.21' />\\n<database jndi-name='jdbc/IMART' url='jdbc:oracle:thin:@DBSV01:1521:ORCL' />\\n<web-app id='intra' document-directory='C:\\\\imart\\\\webapps\\\\intra' />" }
     ]
   },
   "commands": [
@@ -55,5 +56,53 @@
     { "id": "batch-task", "title": "定期Excel出力停止", "description": "深夜のExcel出力バッチが実行されていません。", "cause": "タスクスケジューラのDailyExcelExportが新APサーバーに移行されていません。", "requiredAsset": "task", "logs": ["[ERROR] Scheduled task DailyExcelExport was not found", "[WARN] Last successful run: yesterday 02:00"], "repairAction": "task", "repairLabel": "タスクスケジューラ設定を移行する" },
     { "id": "resin-service", "title": "APサービス起動失敗", "description": "DNS切替後、アプリケーションにアクセスできません。", "cause": "Resin Windowsサービスの起動設定が未確認です。", "requiredAsset": "service", "logs": ["[ERROR] Service Resin is stopped", "[INFO] Startup type: Manual"], "repairAction": "service", "repairLabel": "Resinサービスを自動起動に設定する" }
   ],
+  "learningObjectives": [
+    { "id": "systeminfo", "title": "Windows ServerのOS情報を確認する", "serverRole": "application", "commands": ["systeminfo"], "tutorialInstruction": "接続中のcmdで systeminfo を実行し、ホスト名とOSバージョンを調べてください。", "beginnerInstruction": "OSとホスト名を確認してください。", "explanation": "OSの世代やホスト名は、互換性・移行計画・接続先の特定に必要です。新旧サーバーで比較して記録します。" },
+    { "id": "hostname", "title": "接続先ホスト名を確認する", "serverRole": "application", "commands": ["hostname"], "tutorialInstruction": "次に hostname を実行し、今操作しているサーバーを特定してください。", "beginnerInstruction": "接続先サーバーを特定してください。", "explanation": "ホスト名はDNSレコード、証明書、ログ、接続設定に現れます。作業対象を取り違えないため、操作前に確認します。" },
+    { "id": "java-version", "title": "Javaのバージョンを確認する", "serverRole": "application", "commands": ["java -version"], "tutorialInstruction": "java -version を実行し、APサーバーのJavaバージョンを確認してください。", "beginnerInstruction": "Javaバージョンを確認してください。", "explanation": "アプリケーションサーバーやライブラリとの互換性があるため、Javaのバージョンと実行環境を新旧で比較します。" },
+    { "id": "oracle-version", "title": "Oracleのバージョンを確認する", "serverRole": "database", "commands": ["sqlplus / as sysdba", "lsnrctl status"], "tutorialInstruction": "DBサーバーへ接続し、sqlplus / as sysdba または lsnrctl status でOracleのバージョンを確認してください。", "beginnerInstruction": "Oracleバージョンを確認してください。", "explanation": "バージョン差によって移行方式、互換性、接続設定、停止時間の見積もりが変わります。Listenerの状態も合わせて確認します。" }
+  ],
+  "learningOrderByMode": {
+    "tutorial": ["systeminfo", "hostname", "java-version", "oracle-version"],
+    "beginner": ["java-version", "oracle-version", "systeminfo", "hostname"],
+    "intermediate": [],
+    "advanced": []
+  },
+  "tutorialSteps": [
+    { "id": "inspect-os", "instruction": "APSV01 の CMD で systeminfo を実行し、Windows Server のバージョンを確認してください。左ペインの接続先が APSV01 であることも確認します。", "requiredEvents": ["inspect:os:source"], "explanation": "OSの世代は、移行先の互換性や必要なテストを決める基礎情報です。" },
+    { "id": "inspect-hostname", "instruction": "続けて hostname を実行し、操作対象が APSV01 であることを確認してください。", "requiredEvents": ["inspect:hostname:source"], "explanation": "ホスト名はDNS・証明書・接続設定に使われます。操作対象を取り違えないため、作業前に確認します。" },
+    { "id": "inspect-java", "instruction": "APSV01 の CMD で java -version を実行し、現行Javaのバージョンを確認してください。", "requiredEvents": ["inspect:java:source"], "explanation": "新APのJavaとアプリケーションの互換性を判断するため、新旧の実行環境を比較します。" },
+    { "id": "inspect-oracle", "instruction": "右側の接続先を DBSV01 にして sqlplus / as sysdba を実行し、次に DBSV02 でも同じ確認をしてください。両方のOracleバージョンを比較します。", "requiredEvents": ["inspect:oracle:source", "inspect:oracle:target"], "explanation": "OracleのバージョンとListenerは、DB移行方式や接続設定を決めるために確認します。" },
+    { "id": "migrate-database", "instruction": "DBSV01 の SQL*Plus 画面で「エクスポート」を押し、DBSV02 の画面で「インポート」を押してください。", "requiredEvents": ["migrate:database"], "explanation": "新APが業務データを使うには、DBスキーマも新DBへ移行する必要があります。" },
+    { "id": "migrate-jdbc", "instruction": "APSV01 で notepad jdbc.properties を開き「コピーを準備」。APSV02 で同じファイルを開き「コピーを受け取る」→ jdbc.url の接続先を DBSV02:1521:ORCL に変更→「保存」してください。コピーだけでは移行完了になりません。", "requiredEvents": ["migrate:jdbc"], "explanation": "新APが旧DBへ接続しないよう、JDBC URLのホスト・ポート・サービス名を新DBに合わせます。保存内容を検証して監査します。" },
+    { "id": "migrate-services", "instruction": "APSV01 の services.msc で「エクスポート」を押し、APSV02 の services.msc で「インポート」を押してください。", "requiredEvents": ["migrate:services"], "explanation": "アプリケーションを実行するWindowsサービスを新APへ移行します。" },
+    { "id": "migrate-resin-config", "instruction": "APSV01 の resin.conf でコピーを準備し、APSV02 で受け取ってください。APSV02 の設定を開き、待受アドレスを 10.10.2.21 に直して保存します。", "requiredEvents": ["migrate:resin-config"], "explanation": "旧サーバーのIPが設定に残ると、新APで待受できません。移行後に新サーバーの値へ更新します。" },
+    { "id": "migrate-tasks", "instruction": "APSV01 の taskschd.msc で「エクスポート」を押し、APSV02 の taskschd.msc で「インポート」を押してください。", "requiredEvents": ["migrate:tasks"], "explanation": "定期バッチを移行しないと、Excel出力や連携処理が停止します。" },
+    { "id": "migrate-certificates", "instruction": "APSV01 の証明書管理で「エクスポート」を押し、APSV02 の証明書管理で「インポート」を押してください。秘密鍵を含む証明書が移行されたことを確認します。", "requiredEvents": ["migrate:certificates"], "explanation": "HTTPSを継続するには、証明書だけでなく対応する秘密鍵も新APに必要です。" },
+    { "id": "start-resin", "instruction": "APSV02 の services.msc を開き、Resin Web Server の「開始」を押してください。状態が「実行中」になったことを確認します。", "requiredEvents": ["start:resin-service"], "explanation": "DNSを切り替える前に、新APのアプリケーションサービスを起動しておきます。" },
+    { "id": "verify-connectivity", "instruction": "APSV02 の CMD で curl http://APSV02:8080/ を実行してください。HTTP/1.1 200 OK になるまで、表示された原因を直してから再確認します。これはDNSを切り替える前の直接接続テストです。", "requiredEvents": ["verify:connectivity"], "explanation": "新APへ直接接続し、Resin・resin.conf・JDBC・DBスキーマが正常なことを切替前に確認します。" },
+    { "id": "reduce-dns-ttl", "instruction": "DNS01 の DNS マネージャーを開き、intra.example.local のTTLを5分 (300秒) にして「適用」してください。シミュレーションではこの適用で待機完了扱いです。", "requiredEvents": ["dns:ttl-lowered"], "explanation": "TTLを短くすると、切替後に旧IPを保持するDNSキャッシュの影響を抑えられます。実環境では短縮後に旧TTLの満了を待つ場合があります。" },
+    { "id": "cutover-dns", "instruction": "DNS01 の同じAレコードの接続先を APSV02 (10.10.2.21) に変更して「適用」してください。この操作が本番DNS切替です。", "requiredEvents": ["dns:cutover"], "explanation": "DNS切替は名前解決先を変える操作であり、新APの起動や疎通テストは別に必要です。" },
+    { "id": "verify-post-cutover", "instruction": "APSV02 の CMD で ipconfig /flushdns を実行し、続けて curl http://intra.example.local:8080/ を実行してください。新APへのHTTP 200を確認します。", "requiredEvents": ["verify:post-cutover"], "explanation": "切替後はクライアントのDNSキャッシュを更新し、本番名で新APに到達できることを確認します。" },
+    { "id": "investigate-events", "instruction": "APSV02 の eventvwr.msc を開き、アプリケーションログを確認してください。エラーがあれば記載された不足設定を修正し、疎通確認をやり直します。", "requiredEvents": ["investigate:events"], "explanation": "ログの発生元と内容を確認すると、サービス・証明書・JDBCなど、修正すべき構成を絞り込めます。" }
+  ],
+  "auditChecks": [
+    { "id": "investigate-os", "title": "OSとホスト名を調査", "requiredEvents": ["inspect:os:source", "inspect:hostname:source"], "operationGuidance": ["APSV01で systeminfo を実行する", "APSV01で hostname を実行する"], "remediation": "左側の接続先を APSV01 にし、CMDで上記2コマンドを実行してください。", "impact": "移行対象とOS互換性を判断できません。", "weight": 5 },
+    { "id": "investigate-java", "title": "Javaバージョンを確認", "requiredEvents": ["inspect:java:source"], "operationGuidance": ["APSV01で java -version を実行する"], "remediation": "APSV01 の CMD で java -version を実行してください。", "impact": "AP実行環境の互換性を見落とす可能性があります。", "weight": 5 },
+    { "id": "investigate-oracle", "title": "旧・新Oracleバージョンを比較", "requiredEvents": ["inspect:oracle:source", "inspect:oracle:target"], "operationGuidance": ["DBSV01でOracleバージョンを確認する", "DBSV02でOracleバージョンを確認する"], "remediation": "各DBサーバーで SQL*Plus を開き、sqlplus / as sysdba または lsnrctl status を実行してください。", "impact": "DB移行方式や接続互換性の判断根拠が不足します。", "weight": 10 },
+    { "id": "migrate-database", "title": "DBスキーマを新DBへ移行", "requiredEvents": ["migrate:database"], "operationGuidance": ["DBSV01からスキーマをエクスポートし、DBSV02へインポートする"], "remediation": "DBSV01のSQL*Plus画面で「エクスポート」、DBSV02のSQL*Plus画面で「インポート」を押してください。", "impact": "新APから業務データを利用できません。", "weight": 15 },
+    { "id": "migrate-jdbc", "title": "JDBC接続設定を移行・確認", "requiredEvents": ["migrate:jdbc"], "operationGuidance": ["APSV02のjdbc.propertiesをDBSV02:1521:ORCLに設定して保存する"], "remediation": "APSV01でjdbc.propertiesのコピーを準備し、APSV02で受け取ります。jdbc.urlを jdbc:oracle:thin:@DBSV02:1521:ORCL に修正して保存してください。", "impact": "APが旧DBへ接続し、切替後にDB接続エラーとなる可能性があります。", "weight": 10 },
+    { "id": "migrate-services", "title": "Windowsサービスを移行", "requiredEvents": ["migrate:services"], "operationGuidance": ["APSV01からAPSV02へサービスをコピーする"], "remediation": "両方のサーバーで services.msc を開き、旧APで「エクスポート」、新APで「インポート」を押してください。", "impact": "Resinなどのサービスが新サーバーに存在しません。", "weight": 10 },
+    { "id": "migrate-resin-config", "title": "resin.confを確認・移行", "requiredEvents": ["migrate:resin-config"], "operationGuidance": ["APSV01からresin.confをコピーし、APSV02の待受IPを10.10.2.21に修正する"], "remediation": "両サーバーのresin.confを開き、旧APでコピーを準備、新APで受け取った後、待受アドレスを10.10.2.21にして保存してください。", "impact": "待受ポートや接続先が旧環境のままになる可能性があります。", "weight": 5 },
+    { "id": "start-resin", "title": "新APのResinサービスを起動", "requiredEvents": ["start:resin-service"], "operationGuidance": ["APSV02のResin Web Serverを開始する"], "remediation": "APSV02 の services.msc で Resin Web Server を開始し、「実行中」を確認してください。", "impact": "DNS切替後にアプリケーションへ接続できません。", "weight": 5 },
+    { "id": "migrate-tasks", "title": "タスクスケジューラを移行", "requiredEvents": ["migrate:tasks"], "operationGuidance": ["APSV01からAPSV02へタスクをコピーする"], "remediation": "両サーバーで taskschd.msc を開き、旧APで「エクスポート」、新APで「インポート」を押してください。", "impact": "定期バッチやCSV・帳票連携が停止する可能性があります。", "weight": 8 },
+    { "id": "migrate-certificates", "title": "秘密鍵を含む証明書を移行", "requiredEvents": ["migrate:certificates"], "operationGuidance": ["秘密鍵を含む証明書をAPSV02へコピーする"], "remediation": "両サーバーで証明書管理を開き、旧APで「エクスポート」、新APで「インポート」を押してください。秘密鍵が「あり」になっていることを確認します。", "impact": "HTTPS接続で証明書エラーが発生する可能性があります。", "weight": 10 },
+    { "id": "reduce-dns-ttl", "title": "切替前にDNS TTLを短縮", "requiredEvents": ["dns:ttl-lowered"], "operationGuidance": ["DNS01でAレコードのTTLを現在値より短くして適用する"], "remediation": "DNS01 の DNS マネージャーで intra.example.local のTTLを5分 (300秒) に変更し、適用してください。", "impact": "旧IPを保持するDNSキャッシュが残り、利用者影響が長引く可能性があります。", "weight": 8 },
+    { "id": "verify-cutover", "title": "新環境の疎通を切替前に確認", "requiredEvents": ["verify:connectivity"], "operationGuidance": ["DNS切替前にAPSV02へHTTP接続し、200 OKを確認する"], "remediation": "DNSを変更する前に APSV02 で curl http://APSV02:8080/ を実行してください。503の場合は表示されたResin・JDBC・DB・resin.confの原因を直します。", "impact": "切替後の名前解決・接続障害を見逃す可能性があります。", "weight": 5 },
+    { "id": "cutover-dns", "title": "DNSを新APへ切替", "requiredEvents": ["dns:cutover"], "operationGuidance": ["DNS01のAレコードをAPSV02 (10.10.2.21) に変更して適用する"], "remediation": "DNS01 の DNS マネージャーで intra.example.local の接続先を APSV02 に変更し、適用してください。", "impact": "利用者の接続先が新環境へ切り替わりません。", "weight": 9 },
+    { "id": "verify-post-cutover", "title": "切替後に本番名で稼働確認", "requiredEvents": ["verify:post-cutover"], "operationGuidance": ["DNSキャッシュを更新し、本番FQDNでHTTP 200を確認する"], "remediation": "APSV02で ipconfig /flushdns を実行後、curl http://intra.example.local:8080/ を実行し、200 OKを確認してください。", "impact": "DNS切替後のキャッシュや本番名経由の接続障害を見逃す可能性があります。", "weight": 5 },
+    { "id": "investigate-events", "title": "障害時にイベントログを確認", "requiredEvents": ["investigate:events"], "operationGuidance": ["APSV02のイベントビューアーでアプリケーションログを確認する"], "remediation": "APSV02 で eventvwr.msc を開き、エラーの発生元と内容に応じてサービス・証明書・JDBCなどの不足設定を修正してください。", "impact": "障害原因を特定できず、復旧が遅れる可能性があります。", "weight": 5 }
+  ],
+  "recommendedOrder": ["investigate-os", "investigate-java", "investigate-oracle", "migrate-database", "migrate-jdbc", "migrate-services", "migrate-resin-config", "migrate-tasks", "migrate-certificates", "start-resin", "verify-cutover", "reduce-dns-ttl", "cutover-dns", "verify-post-cutover", "investigate-events"],
   "advisorContext": "新人SE向けのWindows Server更改案件。停止時間と変更リスクのトレードオフを説明し、次に確認すべき現場の観点を短く提案する。秘密情報や資格情報の入力は求めない。"
 }
