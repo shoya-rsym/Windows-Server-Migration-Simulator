@@ -64,6 +64,7 @@ import type {
 } from "./domain/models";
 import { loadScenario } from "./domain/scenario";
 import { createInitialProjectWorkspace } from "./domain/project";
+import { parseSimulationSave, type SimulationSave } from "./domain/save";
 import {
   calculateAuditReport,
   getCutoverReadiness,
@@ -80,97 +81,14 @@ if (scenarios.length === 0) throw new Error("シナリオJSONが見つかりま�
 type DesktopShortcut = "cmd" | "powershell" | "explorer" | ManagerApp;
 type ShellMode = "cmd" | "powershell";
 
-interface SimulationSave {
-  version: 2;
-  mode: DifficultyMode;
-  provider: DeploymentProvider;
-  paneServerIds: [string, string];
-  environments: RuntimeEnvironments;
-  dns: DnsRuntime;
-  dnsDraft: DnsRuntime;
-  history: Record<string, ConsoleEntry[]>;
-  inputs: Record<string, string>;
-  activeApps: Record<string, ManagerApp | null>;
-  shellModes: Record<string, ShellMode>;
-  transfer: TransferPackage | null;
-  hypotheses: HypothesisNote[];
-  drafts: Record<string, string>;
-  taskRuns: Record<string, string>;
-  completedObjectives: string[];
-  knowledgeRecords: KnowledgeRecord[];
-  auditEvents: AuditEvent[];
-  startedAt: number;
-  entryId: number;
-  projectWorkspace?: ProjectWorkspace;
-  expertIncidentId?: string | null;
-  cloudWorkspace?: CloudWorkspace;
-}
-
-function isSimulationSave(value: unknown): value is SimulationSave {
-  if (typeof value !== "object" || value === null) return false;
-  const record = value as Record<string, unknown>;
-  const isRecord = (item: unknown) => typeof item === "object" && item !== null && !Array.isArray(item);
-  const isStringArray = (item: unknown) => Array.isArray(item) && item.every((entry) => typeof entry === "string");
-  const isProjectWorkspace = (item: unknown) => {
-    if (item === undefined) return true;
-    if (!isRecord(item)) return false;
-    const workspace = item as Record<string, unknown>;
-    const isRecordArray = (value: unknown, fields: string[]) =>
-      Array.isArray(value) && value.every((entry) =>
-        isRecord(entry) && fields.every((field) => typeof entry[field] === "string"),
-      );
-    return isRecordArray(workspace.investigationNotes, ["id", "title", "detail"])
-      && Array.isArray(workspace.investigationNotes)
-      && workspace.investigationNotes.every((entry) => typeof entry.createdAt === "number")
-      && isRecordArray(workspace.architectureEdges, ["id", "from", "to"])
-      && typeof workspace.plannedDowntimeMinutes === "number"
-      && typeof workspace.maintenanceWindow === "string"
-      && typeof workspace.ttlLeadDays === "number"
-      && typeof workspace.noticeLeadDays === "number"
-      && typeof workspace.noticeSubject === "string"
-      && typeof workspace.noticeBody === "string"
-      && typeof workspace.noticeSent === "boolean"
-      && ["expdp", "rman", "dataguard"].includes(String(workspace.migrationStrategy))
-      && typeof workspace.rollbackPlan === "string"
-      && ["pending", "go", "no-go", "rollback", "continue"].includes(String(workspace.cutoverDecision));
-  };
-  const isCloudWorkspace = (item: unknown) => {
-    if (item === undefined) return true;
-    if (!isRecord(item)) return false;
-    const workspace = item as Record<string, unknown>;
-    return (workspace.vpcCidr === null || typeof workspace.vpcCidr === "string")
-      && (workspace.subnetCidr === null || typeof workspace.subnetCidr === "string")
-      && typeof workspace.securityGroupCreated === "boolean"
-      && Array.isArray(workspace.securityGroupPorts)
-      && workspace.securityGroupPorts.every((port) => Number.isInteger(port) && Number(port) >= 1 && Number(port) <= 65535)
-      && isStringArray(workspace.instanceServerIds);
-  };
-  return record.version === 2
-    && ["tutorial", "beginner", "intermediate", "advanced", "expert"].includes(String(record.mode))
-    && ["onprem", "aws", "azure"].includes(String(record.provider))
-    && Array.isArray(record.paneServerIds) && record.paneServerIds.length === 2 && isStringArray(record.paneServerIds)
-    && isRecord(record.environments)
-    && isRecord(record.dns) && isRecord(record.dnsDraft)
-    && isRecord(record.history) && isRecord(record.inputs) && isRecord(record.activeApps)
-    && isRecord(record.shellModes)
-    && isRecord(record.drafts) && isRecord(record.taskRuns)
-    && (record.transfer === null || isRecord(record.transfer))
-    && Array.isArray(record.hypotheses) && Array.isArray(record.completedObjectives)
-    && isStringArray(record.completedObjectives)
-    && Array.isArray(record.knowledgeRecords) && Array.isArray(record.auditEvents)
-    && isProjectWorkspace(record.projectWorkspace)
-    && (record.expertIncidentId === undefined || record.expertIncidentId === null || typeof record.expertIncidentId === "string")
-    && isCloudWorkspace(record.cloudWorkspace)
-    && typeof record.startedAt === "number" && typeof record.entryId === "number";
-}
-
 function readSimulationSave(saveKey: string): { save: SimulationSave | null; error: string | null } {
   try {
     const raw = window.localStorage.getItem(saveKey);
     if (!raw) return { save: null, error: null };
     const parsed: unknown = JSON.parse(raw);
-    if (!isSimulationSave(parsed)) throw new Error("保存データの形式が一致しません。最初から開始してください。");
-    return { save: parsed, error: null };
+    const save = parseSimulationSave(parsed);
+    if (!save) throw new Error("保存データの形式が一致しません。最初から開始してください。");
+    return { save, error: null };
   } catch (error) {
     return {
       save: null,
