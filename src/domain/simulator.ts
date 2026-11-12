@@ -27,12 +27,17 @@ export interface ShellResult {
 }
 
 export function jdbcPropertiesTargetDatabase(content: string, server: Server, database: Database): boolean {
-  const url = content.match(/^jdbc\.url=.*@([^:/\s]+):(\d+):([^\s]+)/im);
+  const url = content.match(/^jdbc\.url=(\S+)/im)?.[1];
+  return Boolean(url && databaseUrlTargetsDatabase(url, server, database));
+}
+
+function databaseUrlTargetsDatabase(url: string, server: Server, database: Database): boolean {
+  const target = url.match(/@([^:/\s'"]+):(\d+):([^/\s'"]+)/i);
   return Boolean(
-    url
-      && (url[1].toLowerCase() === server.hostname.toLowerCase() || url[1] === server.ipAddress)
-      && Number(url[2]) === database.listenerPort
-      && url[3].toLowerCase() === database.serviceName.toLowerCase(),
+    target
+      && (target[1].toLowerCase() === server.hostname.toLowerCase() || target[1] === server.ipAddress)
+      && Number(target[2]) === database.listenerPort
+      && target[3].toLowerCase() === database.serviceName.toLowerCase(),
   );
 }
 
@@ -391,11 +396,23 @@ function applicationHealthIssues(
   const environment = environments[application.id];
   if (!environment) return ["アプリケーション環境が見つかりません。"];
   const issues: string[] = [];
+  if (!environment.installedSoftware.some((software) => software.toLowerCase().startsWith("java "))) {
+    issues.push("Javaがインストールされていません。Resinの実行環境を確認してください。");
+  }
+  if (!environment.installedSoftware.some((software) => software.toLowerCase().startsWith("resin "))) {
+    issues.push("Resinがインストールされていません。");
+  }
   const resin = environment.services.find((service) => service.name.toLowerCase().includes("resin"));
   if (!resin || resin.status !== "running") issues.push("Resin Windowsサービスが存在しないか、停止しています。");
   const resinConfig = environment.configurationFiles.find((file) => file.name.toLowerCase() === "resin.conf");
   if (!resinConfig?.content.includes(application.ipAddress)) issues.push(`resin.conf の待受アドレスが ${application.ipAddress} ではありません。`);
 
+  const sourceApplication = scenario.assets.servers.find((item) =>
+    item.role === "application" && item.stage === "source",
+  );
+  const sourceResinConfig = scenario.assets.configurationFiles.find((file) =>
+    file.serverId === sourceApplication?.id && file.name.toLowerCase() === "resin.conf",
+  );
   const database = scenario.assets.servers.find((server) =>
     server.role === "database" && server.stage === application.stage,
   );
@@ -410,14 +427,21 @@ function applicationHealthIssues(
     } else if (!environment.jdbcProperties) {
       issues.push("jdbc.properties がありません。");
     }
+    if (sourceResinConfig?.content.match(/jdbc:oracle:thin:@/i)) {
+      const resinDatabaseUrl = resinConfig?.content.match(/jdbc:oracle:thin:@[^/\s'"]+/i)?.[0];
+      if (!resinDatabaseUrl || !databaseUrlTargetsDatabase(resinDatabaseUrl, database, databaseConfig)) {
+        issues.push(`resin.conf のDB接続先が ${database.hostname}:${databaseConfig.listenerPort}:${databaseConfig.serviceName} ではありません。`);
+      }
+    }
     const sourceDatabase = scenario.assets.servers.find((item) =>
       item.role === "database" && item.stage === "source",
     );
-    const requiredSchema = sourceDatabase
-      ? scenario.assets.databases.find((item) => item.serverId === sourceDatabase.id)?.schemas[0]
-      : undefined;
-    if (requiredSchema && !databaseEnvironment.databaseSchemas.includes(requiredSchema)) {
-      issues.push(`DBに ${requiredSchema} スキーマがありません。`);
+    const requiredSchemas = sourceDatabase
+      ? scenario.assets.databases.find((item) => item.serverId === sourceDatabase.id)?.schemas ?? []
+      : [];
+    const missingSchemas = requiredSchemas.filter((schema) => !databaseEnvironment.databaseSchemas.includes(schema));
+    if (missingSchemas.length) {
+      issues.push(`DBに必要なスキーマがありません: ${missingSchemas.join(", ")}。`);
     }
     if (allowedInboundPorts && !allowedInboundPorts.includes(databaseConfig.listenerPort)) {
       issues.push(`Security Group が TCP ${databaseConfig.listenerPort} を遮断しています。`);
@@ -447,6 +471,12 @@ export function getEventLog(
   const dnsName = scenario.assets.dns[0]?.name ?? "application";
   const sourceApplication = scenario.assets.servers.find((item) => item.role === "application" && item.stage === "source");
   const serviceIncident = scenario.incidents.find((item) => item.requiredAsset === "service");
+  if (!environment.installedSoftware.some((software) => software.toLowerCase().startsWith("java "))) {
+    events.push({ source: "Java Runtime", type: "Error", message: "Javaがインストールされていません。" });
+  }
+  if (!environment.installedSoftware.some((software) => software.toLowerCase().startsWith("resin "))) {
+    events.push({ source: "Resin", type: "Error", message: "Resinがインストールされていません。" });
+  }
   const requiredServices = scenario.assets.services.filter((item) => item.serverId === sourceApplication?.id);
   for (const service of requiredServices) {
     const targetService = environment.services.find((item) => item.name === service.name);
@@ -457,6 +487,11 @@ export function getEventLog(
         message: targetService ? `${service.name} service is stopped.` : serviceIncident?.logs[0] ?? `${service.name} service was not found.`,
       });
     }
+  }
+
+  const resinConfig = environment.configurationFiles.find((file) => file.name.toLowerCase() === "resin.conf");
+  if (!resinConfig?.content.includes(server.ipAddress)) {
+    events.push({ source: "Resin", type: "Error", message: `resin.conf の待受アドレスが ${server.ipAddress} ではありません。` });
   }
 
   const certificateIncident = scenario.incidents.find((item) => item.requiredAsset === "certificate");
@@ -475,6 +510,14 @@ export function getEventLog(
   const database = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "target");
   const sourceDatabase = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "source");
   const targetDatabaseInfo = database && scenario.assets.databases.find((item) => item.serverId === database.id);
+  const targetDatabaseEnvironment = database && environments[database.id];
+  if (database && targetDatabaseEnvironment && !oracleListenerRunning(targetDatabaseEnvironment)) {
+    events.push({
+      source: "Oracle Database",
+      type: "Error",
+      message: `OracleサービスまたはListenerが ${database.hostname} で起動していません。`,
+    });
+  }
   if (targetDatabaseInfo && allowedInboundPorts && !allowedInboundPorts.includes(targetDatabaseInfo.listenerPort)) {
     events.push({
       source: "AWS Security Group",
@@ -482,20 +525,38 @@ export function getEventLog(
       message: `インバウンドルールにTCP ${targetDatabaseInfo.listenerPort}がなく、APからOracle Listenerへ接続できません。`,
     });
   }
-  const requiredSchema = sourceDatabase
-    ? scenario.assets.databases.find((item) => item.serverId === sourceDatabase.id)?.schemas[0]
-    : undefined;
-  const migratedSchema = database && requiredSchema
-    ? environments[database.id]?.databaseSchemas.includes(requiredSchema)
-    : Boolean(database && environments[database.id]?.databaseSchemas.length);
+  const sourceResinConfig = scenario.assets.configurationFiles.find((file) =>
+    file.serverId === sourceApplication?.id && file.name.toLowerCase() === "resin.conf",
+  );
+  if (sourceResinConfig?.content.match(/jdbc:oracle:thin:@/i) && database && targetDatabaseInfo) {
+    const resinDatabaseUrl = resinConfig?.content.match(/jdbc:oracle:thin:@[^/\s'"]+/i)?.[0];
+    if (!resinDatabaseUrl || !databaseUrlTargetsDatabase(resinDatabaseUrl, database, targetDatabaseInfo)) {
+      events.push({
+        source: "Resin",
+        type: "Error",
+        message: `resin.conf のDB接続先が ${database.hostname}:${targetDatabaseInfo.listenerPort}:${targetDatabaseInfo.serviceName} ではありません。`,
+      });
+    }
+  }
+  const requiredSchemas = sourceDatabase
+    ? scenario.assets.databases.find((item) => item.serverId === sourceDatabase.id)?.schemas ?? []
+    : [];
+  const targetSchemas = targetDatabaseEnvironment?.databaseSchemas ?? [];
+  const missingSchemas = requiredSchemas.filter((schema) => !targetSchemas.includes(schema));
   if (!database || !targetDatabaseInfo || !environment.jdbcProperties
-    || !jdbcPropertiesTargetDatabase(environment.jdbcProperties, database, targetDatabaseInfo)
-    || !migratedSchema) {
+    || !jdbcPropertiesTargetDatabase(environment.jdbcProperties, database, targetDatabaseInfo)) {
     const jdbcIncident = scenario.incidents.find((item) => item.requiredAsset === "jdbc");
     events.push({
       source: "intra-mart",
       type: "Error",
       message: jdbcIncident?.logs[0] ?? `JDBC connection failed${environment.jdbcProperties ? ` (${environment.jdbcProperties.match(/@([^/\n]+)/)?.[1] ?? "unknown"})` : " (jdbc.properties not found)"}.`,
+    });
+  }
+  if (missingSchemas.length) {
+    events.push({
+      source: "Oracle Database",
+      type: "Error",
+      message: `移行先に必要なスキーマがありません: ${missingSchemas.join(", ")}。`,
     });
   }
   const sourceRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;

@@ -47,9 +47,9 @@ type jdbc.properties
 - **taskschd.msc** — 実行ファイル、スケジュール、実行ユーザー、結果の確認・実行。
 - **certlm.msc** — 個人・中間CA・信頼されたルートの証明書、有効期限、秘密鍵の比較・移行。
 - **eventvwr.msc** — 切替後の状態に応じたイベントログから障害を調査。
-- **notepad resin.conf / jdbc.properties** — 旧・新設定を比較し、編集・保存・移行。
+- **notepad resin.conf / jdbc.properties** — 旧・新設定を比較し、編集・保存・移行。新APではresin.confの待受IPとDB接続先、jdbc.propertiesのDB接続先をそれぞれ新環境に合わせます。
 - **JDBC移行** — APSV01でコピーを準備し、APSV02で受け取った後、`jdbc.url`を`DBSV02:1521:ORCL`に変更して保存します。コピーだけでは監査完了になりません。
-- **切替前の疎通確認** — 新APで`curl http://APSV02:8080/`を実行します。Resin、resin.conf、JDBC、DBスキーマの条件を満たすと`HTTP/1.1 200 OK`になります。
+- **切替前の疎通確認** — 新APで`curl http://APSV02:8080/`を実行します。Java／Resin、resin.confの待受IPとDB接続先、JDBC、DB Listener、必要な全スキーマを確認し、条件を満たすと`HTTP/1.1 200 OK`になります。
 - **Oracleデータ移行** — 現行DBで`expdp`を実行するとスキーマとデータ世代を含む移行パッケージを作成し、新DBで`impdp`を実行すると取り込みます。Oracle未導入・サービス停止・誤った実行先・未作成パッケージはエラーになります。現行DBで「業務更新を1件発生」させた後は、再度`expdp`し、新DBで`impdp`して最終同期します。SQL*Plus画面のエクスポート／インポート操作でも同じパッケージを扱えます。
 - **dnsmgmt.msc** — DNSのAレコードとTTLを調査・切替。DNS適用は名前解決先の切替であり、疎通確認ではありません。シミュレーションではTTL短縮の適用で待機完了扱いにしますが、実環境では短縮後に旧TTLの満了を待つ場合があります。切替後は`ipconfig /flushdns`を実行し、`curl http://intra.example.local:8080/`で本番名経由の稼働を確認します。
 
