@@ -309,8 +309,8 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     cloudWorkspace,
   ]);
 
-  const recordAuditEvent = (name: string) => {
-    setAuditEvents((previous) => previous.some((event) => event.name === name)
+  const recordAuditEvent = (name: string, allowRepeat = false) => {
+    setAuditEvents((previous) => !allowRepeat && previous.some((event) => event.name === name)
       ? previous
       : [...previous, { name, at: Date.now() }]);
   };
@@ -424,7 +424,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
 
   const recordCutoverDecision = (decision: ProjectWorkspace["cutoverDecision"]) => {
     setProjectWorkspace((previous) => ({ ...previous, cutoverDecision: decision }));
-    recordAuditEvent(`project:decision:${decision}`);
+    recordAuditEvent(`project:decision:${decision}`, true);
     notify(`切替判断を記録しました: ${decision === "go" ? "Go" : decision === "no-go" ? "No-Go" : decision}`);
   };
 

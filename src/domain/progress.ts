@@ -251,7 +251,13 @@ function getProjectFindings(
       remediation: "判断期限、DNSを旧APへ戻す手順、旧環境を維持する時間、利用者への連絡方法を記載してください。",
     });
   }
-  const cutoverDone = events.some((event) => event.name === "dns:cutover");
+  const cutoverIndex = events.findIndex((event) => event.name === "dns:cutover");
+  const cutoverDone = cutoverIndex >= 0;
+  const decisionEvents = events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.name === "project:decision:go" || event.name === "project:decision:no-go");
+  const latestDecision = decisionEvents[decisionEvents.length - 1];
+  const noticeIndex = events.findIndex((event) => event.name === "project:notice-sent");
   const rollbackDone = events.some((event) => event.name === "dns:rollback");
   if (rollbackDone
     && events.some((event) => event.name === "dns:rollback-cache-stale")
@@ -269,25 +275,36 @@ function getProjectFindings(
       remediation: "DNSキャッシュを更新した後、curl http://intra.example.local:8080/ を実行し、旧APでHTTP 200になることを確認してください。",
     });
   }
-  if (cutoverDone && project.cutoverDecision === "pending") {
+  if (cutoverDone && (!latestDecision || latestDecision.index > cutoverIndex)) {
     findings.push({
       id: "cutover-decision",
-      title: "Go / No-Go判定を記録せずにDNSを切り替えています",
-      remediation: "案件デスクの「切替判断」で、事前疎通・作業計画・未解決リスクを確認して判定を記録してください。",
+      title: "Go / No-Go判定を記録する前にDNSを切り替えています",
+      remediation: "DNSを切り替える前に案件デスクの「切替判断」で事前疎通・作業計画・未解決リスクを確認し、GoまたはNo-Goを記録してください。",
     });
   }
-  if (project.cutoverDecision === "go" && !events.some((event) => event.name === "verify:connectivity")) {
+  const latestGoIndex = events.reduce((latestIndex, event, index) =>
+    event.name === "project:decision:go" ? index : latestIndex, -1);
+  const connectivityIndex = events.findIndex((event) => event.name === "verify:connectivity");
+  if (latestGoIndex >= 0
+    && (connectivityIndex < 0 || connectivityIndex > latestGoIndex || (cutoverDone && connectivityIndex > cutoverIndex))) {
     findings.push({
       id: "preflight",
-      title: "切替前の疎通確認をせずにGo判定しています",
-      remediation: "DNS切替前に新APへ直接接続し、アプリケーションとDBの応答を確認してから判定してください。",
+      title: "新環境の疎通確認前にGo判定、または切替を実施しています",
+      remediation: "DNS切替前に新APへ直接接続し、アプリケーションとDBの応答を確認してからGo判定を記録してください。",
     });
   }
-  if (project.cutoverDecision === "no-go" && cutoverDone) {
+  if (cutoverDone && latestDecision?.event.name === "project:decision:no-go" && latestDecision.index < cutoverIndex) {
     findings.push({
       id: "no-go-cutover",
       title: "No-Go判定後にDNS切替が実施されています",
       remediation: "未解決事項を修正するか、切替を中止してください。既に切替済みの場合は影響を評価し、必要なら切戻してください。",
+    });
+  }
+  if (cutoverDone && noticeIndex > cutoverIndex) {
+    findings.push({
+      id: "late-user-notice",
+      title: "DNS切替後に利用者周知を送信しています",
+      remediation: "既に切替済みの場合は利用者影響と問い合わせ状況を確認してください。次回作業では切替前日までに停止時間・対象業務・問い合わせ先を周知してください。",
     });
   }
   return findings;
