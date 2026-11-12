@@ -1362,6 +1362,7 @@ function ProjectDeskModal({
               <label>切戻し手順・判断条件<textarea rows={4} value={project.rollbackPlan} onChange={(event) => update({ rollbackPlan: event.target.value })} placeholder="例: 23:30までにログイン確認できない場合、DNSを旧APへ戻し、旧AP/DBは翌営業日まで維持する。" /></label>
             </div>
             <p className="project-plan-note">DB移行方式は計画上の選択です。現在のSQL*Plus画面ではData Pumpの疑似操作を提供します。RMAN・Data Guardの動作差分は後続段階で実装します。</p>
+            <p className="project-plan-note">TTL短縮は切替3日前以上に計画し、DNSマネージャーでTTLだけを先に適用してください。シミュレーションでは待機完了として扱いますが、計画日数とTTL適用の作業順は監査レポートで別々に確認します。</p>
             <p className={`project-limit-note ${project.plannedDowntimeMinutes > scenario.project.downtimeLimitMinutes ? "warning" : ""}`}>
               許容停止時間: {scenario.project.downtimeLimitMinutes} 分 · 現在の計画: {project.plannedDowntimeMinutes} 分
             </p>

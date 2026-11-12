@@ -94,13 +94,7 @@ export function calculateAuditReport(
   const missingCriticalChecks = checks.filter(
     ({ check, complete }) => !complete && ["migrate-database", "migrate-jdbc", "migrate-services", "start-resin", "cutover-dns"].includes(check.id),
   ).length;
-  const cutoverIndex = events.findIndex((event) => event.name === "dns:cutover");
-  const legacyTtlPrepared = !events.some((event) => event.name === "dns:ttl-lowered-during-cutover")
-    && events.some((event, index) => event.name === "dns:ttl-lowered" && (cutoverIndex < 0 || index < cutoverIndex));
-  const ttlPreparedBeforeCutover = (scenario.assets.dns[0]?.ttlSeconds ?? Infinity) <= 300
-    || legacyTtlPrepared
-    || events.some((event, index) => event.name === "dns:ttl-prepared" && (cutoverIndex < 0 || index < cutoverIndex));
-  const ttlMissed = !ttlPreparedBeforeCutover;
+  const ttlMissed = !wasTtlPreparedBeforeCutover(scenario, events);
   const estimatedDowntimeMinutes = missingCriticalChecks * 5 + (ttlMissed ? 30 : 0);
   const cutoverAt = events.find((event) => event.name === "dns:cutover")?.at;
   const investigationAt = events.find((event) => event.name === "investigate:events")?.at;
@@ -182,7 +176,8 @@ function calculateProjectScores(
   const operationsScore =
     (project.noticeSent ? 25 : 0)
     + (project.noticeSent && project.noticeLeadDays >= 1 ? 15 : 0)
-    + (project.ttlLeadDays >= 3 ? 20 : 0)
+    + (project.ttlLeadDays >= 3 ? 10 : 0)
+    + (wasTtlPreparedBeforeCutover(scenario, events) ? 10 : 0)
     + (downtimeScore ? 15 : 0)
     + (hasRollbackPlan ? 15 : 0)
     + (project.cutoverDecision !== "pending" ? 10 : 0);
@@ -195,6 +190,18 @@ function calculateProjectScores(
     { id: "security", label: "セキュリティ", score: securityScore },
     { id: "operations", label: "運用品質", score: operationsScore },
   ];
+}
+
+function wasTtlPreparedBeforeCutover(scenario: Scenario, events: AuditEvent[]): boolean {
+  if ((scenario.assets.dns[0]?.ttlSeconds ?? Infinity) <= 300) return true;
+
+  const cutoverIndex = events.findIndex((event) => event.name === "dns:cutover");
+  if (events.some((event, index) => event.name === "dns:ttl-prepared" && (cutoverIndex < 0 || index < cutoverIndex))) {
+    return true;
+  }
+
+  return !events.some((event) => event.name === "dns:ttl-lowered-during-cutover")
+    && events.some((event, index) => event.name === "dns:ttl-lowered" && (cutoverIndex < 0 || index < cutoverIndex));
 }
 
 function getProjectFindings(
@@ -259,6 +266,7 @@ function getProjectFindings(
   }
   const cutoverIndex = events.findIndex((event) => event.name === "dns:cutover");
   const cutoverDone = cutoverIndex >= 0;
+  const ttlPrepared = wasTtlPreparedBeforeCutover(scenario, events);
   const decisionEvents = events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => event.name === "project:decision:go" || event.name === "project:decision:no-go");
@@ -292,6 +300,13 @@ function getProjectFindings(
       remediation: ttlChangedDuringCutover
         ? "TTL短縮とAレコード変更を同時に適用しても、旧TTLのキャッシュは更新されません。操作端末で ipconfig /flushdns を実行してnslookupとHTTP疎通を確認してください。次回はTTLだけを先に適用し、待機後にAレコードを切り替えてください。"
         : "操作端末で ipconfig /flushdns を実行してnslookup intra.example.local と curl http://intra.example.local:8080/ を確認してください。次回はTTLだけを先に300秒以下へ短縮し、待機後にAレコードを切り替えてください。",
+    });
+  }
+  if (cutoverDone && !ttlPrepared) {
+    findings.push({
+      id: "ttl-operation-order",
+      title: "DNS TTL短縮の計画と実施順序が一致していません",
+      remediation: "切替済みの場合は操作端末でDNSキャッシュを確認し、必要なら ipconfig /flushdns 後に本番名で疎通してください。次回は案件デスクで切替3日前以上に計画し、DNSマネージャーでTTLだけを300秒以下に短縮・適用してからAレコードを変更してください。",
     });
   }
   if (cutoverDone && (!latestDecision || latestDecision.index > cutoverIndex)) {
