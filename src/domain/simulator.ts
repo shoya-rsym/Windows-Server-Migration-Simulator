@@ -199,7 +199,7 @@ export function runCommand(
     return { output: ["Windows IP Configuration", "Successfully flushed the DNS Resolver Cache."], flushDns: true };
   }
   if (normalized === "netstat" || normalized === "netstat -ano" || normalized === "netstat -an") {
-    return { output: netstat(server, scenario, environment) };
+    return { output: netstat(server, scenario, environment, environments, allowedInboundPorts) };
   }
   if (normalized === "route print") {
     const network = server.ipAddress.split(".").slice(0, 3).join(".");
@@ -255,20 +255,17 @@ export function runCommand(
   }
   if (normalized === "sc query") return { output: serviceQuery(environment) };
   if (normalized === "lsnrctl status" && server.role === "database") {
-    const hasRunningOracleService = environment.services.some(
-      (service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running",
-    );
     const database = scenario.assets.databases.find((item) => item.serverId === server.id);
     if (!environment.databaseVersion) {
       return { output: ["'lsnrctl' is not recognized as an internal or external command,", "operable program or batch file."] };
     }
-    if (!hasRunningOracleService) {
+    if (!oracleListenerRunning(environment)) {
       return { output: ["TNS-12541: TNS:no listener", "The listener is not running."] };
     }
     return {
       output: [
         `LSNRCTL for ${environment.databaseVersion ?? "Oracle"} - Production`,
-        `Connecting to (HOST=${server.hostname})(PORT=1521)`,
+        `Connecting to (HOST=${server.hostname})(PORT=${database?.listenerPort ?? 1521})`,
         "STATUS of the LISTENER",
         `Service "${database?.serviceName ?? server.hostname}" has 1 instance(s).`,
         `  Instance "${database?.serviceName ?? server.hostname}", status READY`,
@@ -285,18 +282,46 @@ export function runCommand(
   if (
     server.role === "database"
     && environment.databaseVersion
-    && !environment.services.some((service) =>
-      service.name.toLowerCase().startsWith("oracleservice") && service.status === "running",
-    )
+    && !oracleListenerRunning(environment)
     && (normalized.startsWith("sqlplus") || normalized.startsWith("expdp") || normalized.startsWith("impdp"))
   ) {
     return { output: ["ORA-12541: TNS:no listener", "Start the Oracle service before using SQL*Plus or Data Pump."] };
   }
   if (args[0] === "tnsping") {
-    const database = scenario.assets.servers.find((item) => item.hostname.toLowerCase() === args[1]);
-    return database
-      ? { output: [`TNS Ping Utility for ${database.hostname}`, "OK (10 msec)"] }
-      : { output: [`TNS-03505: Failed to resolve name ${args[1] ?? ""}`] };
+    const alias = args[1];
+    const targetDatabase = scenario.assets.databases
+      .map((database) => ({
+        database,
+        server: scenario.assets.servers.find((item) => item.id === database.serverId),
+      }))
+      .find(({ database, server: targetServer }) =>
+        targetServer !== undefined
+        && (targetServer.hostname.toLowerCase() === alias
+          || targetServer.ipAddress.toLowerCase() === alias
+          || database.serviceName.toLowerCase() === alias)
+        && (targetServer.stage === server.stage || !scenario.assets.databases.some((item) =>
+          item.serviceName.toLowerCase() === alias
+          && scenario.assets.servers.find((candidate) => candidate.id === item.serverId)?.stage === server.stage,
+        )),
+      );
+    if (!targetDatabase?.server) {
+      return { output: [`TNS-03505: Failed to resolve name ${alias ?? ""}`] };
+    }
+
+    const targetEnvironment = environments[targetDatabase.server.id];
+    if (!targetEnvironment || !oracleListenerRunning(targetEnvironment)) {
+      return { output: ["TNS-12541: TNS:no listener", `Listener is not running on ${targetDatabase.server.hostname}.`] };
+    }
+    if (allowedInboundPorts && !allowedInboundPorts.includes(targetDatabase.database.listenerPort)) {
+      return { output: ["TNS-12541: TNS:no listener", `TCP ${targetDatabase.database.listenerPort} is blocked by the Security Group.`] };
+    }
+    return {
+      output: [
+        `TNS Ping Utility for ${targetDatabase.server.hostname}`,
+        `Attempting to contact (HOST=${targetDatabase.server.hostname})(PORT=${targetDatabase.database.listenerPort})(SERVICE_NAME=${targetDatabase.database.serviceName})`,
+        "OK (10 msec)",
+      ],
+    };
   }
 
   const manager = managerForCommand(normalized, server);
@@ -344,10 +369,7 @@ function applicationHealthIssues(
   if (!database || !databaseConfig || !databaseEnvironment) {
     issues.push("同じ世代のDB環境が見つかりません。");
   } else {
-    const oracleService = databaseEnvironment.services.find((service) =>
-      service.name.toLowerCase().startsWith("oracleservice"),
-    );
-    if (!oracleService || oracleService.status !== "running") issues.push("OracleサービスまたはListenerが起動していません。");
+    if (!oracleListenerRunning(databaseEnvironment)) issues.push("OracleサービスまたはListenerが起動していません。");
     if (environment.jdbcProperties && !jdbcPropertiesTargetDatabase(environment.jdbcProperties, database, databaseConfig)) {
       issues.push(`jdbc.properties の接続先が ${database.hostname}:${databaseConfig.listenerPort}:${databaseConfig.serviceName} ではありません。`);
     } else if (!environment.jdbcProperties) {
@@ -525,14 +547,20 @@ function ipConfig(server: Server, scenario: Scenario): string[] {
   ];
 }
 
-function netstat(server: Server, scenario: Scenario, environment: RuntimeEnvironment): string[] {
+function netstat(
+  server: Server,
+  scenario: Scenario,
+  environment: RuntimeEnvironment,
+  environments: RuntimeEnvironments,
+  allowedInboundPorts?: number[],
+): string[] {
   const result = ["Active Connections", "", "  Proto  Local Address          Foreign Address        State"];
   if (server.role === "database") {
-    const listenerRunning = environment.databaseVersion
-      && environment.services.some((service) =>
-        service.name.toLowerCase().startsWith("oracleservice") && service.status === "running",
-      );
-    if (listenerRunning) result.push("  TCP    0.0.0.0:1521           0.0.0.0:0              LISTENING");
+    const listenerRunning = oracleListenerRunning(environment);
+    const database = scenario.assets.databases.find((item) => item.serverId === server.id);
+    if (listenerRunning) {
+      result.push(`  TCP    0.0.0.0:${database?.listenerPort ?? 1521}           0.0.0.0:0              LISTENING`);
+    }
   } else if (server.role === "dns") {
     result.push("  UDP    0.0.0.0:53             *:*");
   } else {
@@ -542,11 +570,31 @@ function netstat(server: Server, scenario: Scenario, environment: RuntimeEnviron
     if (resin && hasTls) result.push("  TCP    0.0.0.0:443            0.0.0.0:0              LISTENING");
     const databaseHost = environment.jdbcProperties?.match(/@([^:/\n]+)/)?.[1];
     const databaseServer = scenario.assets.servers.find((item) => item.hostname.toLowerCase() === databaseHost?.toLowerCase());
-    if (resin && databaseServer) {
-      result.push(`  TCP    ${server.ipAddress}:53122  ${databaseServer.ipAddress}:1521      ESTABLISHED`);
+    const database = databaseServer && scenario.assets.databases.find((item) => item.serverId === databaseServer.id);
+    const databaseEnvironment = databaseServer && environments[databaseServer.id];
+    if (
+      resin
+      && environment.jdbcProperties
+      && databaseServer
+      && database
+      && databaseEnvironment
+      && oracleListenerRunning(databaseEnvironment)
+      && jdbcPropertiesTargetDatabase(environment.jdbcProperties, databaseServer, database)
+      && (!allowedInboundPorts || allowedInboundPorts.includes(database.listenerPort))
+    ) {
+      result.push(`  TCP    ${server.ipAddress}:53122  ${databaseServer.ipAddress}:${database.listenerPort}      ESTABLISHED`);
     }
   }
   return result;
+}
+
+function oracleListenerRunning(environment: RuntimeEnvironment): boolean {
+  return Boolean(
+    environment.databaseVersion
+    && environment.services.some((service) =>
+      service.name.toLowerCase().startsWith("oracleservice") && service.status === "running",
+    ),
+  );
 }
 
 function nslookup(host: string | undefined, scenario: Scenario, dns: DnsRuntime): string[] {
