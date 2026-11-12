@@ -539,6 +539,11 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
 
     if (result.flushDns) {
       recordAuditEvent("dns:flush");
+      if (auditEvents.some((event) => event.name === "dns:cutover-cache-stale")
+        && dns.address === targetApplication?.ipAddress
+        && dns.cachedAddress !== dns.address) {
+        recordAuditEvent("dns:cutover-cache-flushed");
+      }
       if (auditEvents.some((event) => event.name === "dns:rollback-cache-stale")
         && dns.address === sourceApplication?.ipAddress
         && dns.cachedAddress !== dns.address) {
@@ -979,17 +984,25 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                 onDatabaseWrite={recordBusinessWrite}
                 onDnsDraftChange={setDnsDraft}
                 onDnsApply={() => {
+                  const addressChanged = dnsDraft.address !== dns.address;
+                  const ttlLowered = dnsDraft.ttlSeconds < dns.ttlSeconds;
+                  const ttlPrepared = !addressChanged && ttlLowered && dnsDraft.ttlSeconds <= 300;
                   const nextDns = {
                     ...dnsDraft,
-                    cachedAddress: dnsDraft.address === dns.address || dnsDraft.ttlSeconds > 300
+                    cachedAddress: !addressChanged || dns.ttlSeconds > 300
                       ? dns.cachedAddress
                       : dnsDraft.address,
                   };
                   setDns(nextDns);
                   setDnsDraft(nextDns);
-                  if (nextDns.ttlSeconds < dns.ttlSeconds) recordAuditEvent("dns:ttl-lowered");
-                  if (dns.address !== targetApplication?.ipAddress && nextDns.address === targetApplication?.ipAddress) recordAuditEvent("dns:cutover");
-                  notify("DNSレコードを適用しました。切替後は操作端末で ipconfig /flushdns を実行してからFQDNで確認してください。");
+                  if (ttlLowered) recordAuditEvent("dns:ttl-lowered");
+                  if (ttlPrepared) recordAuditEvent("dns:ttl-prepared");
+                  if (addressChanged && nextDns.address === targetApplication?.ipAddress) {
+                    recordAuditEvent("dns:cutover");
+                    if (ttlLowered) recordAuditEvent("dns:ttl-lowered-during-cutover");
+                    if (nextDns.cachedAddress !== nextDns.address) recordAuditEvent("dns:cutover-cache-stale");
+                  }
+                  notify("TTLはAレコード変更前に単独で適用してください。切替後はnslookupとHTTP疎通でキャッシュ状態を確認してください。");
                 }}
                 onJdbcChange={(value) => {
                   const key = activeApp === "resinConfig" ? resinConfigDraftKey(serverId) : jdbcDraftKey(serverId);
@@ -1715,7 +1728,7 @@ function ManagerWindow({
 
       {app === "dns" && <ManagerFrame title={`DNS マネージャー - ${server.hostname}`} icon={<Network size={15} />}>
         <div className="dns-record-card"><div className="dns-card-icon"><Network size={17} /></div><div><small>前方参照ゾーン / A レコード</small><strong>{scenario.assets.dns[0].name}</strong></div><span className="dns-ttl">TTL {dns.ttlSeconds}s</span></div>
-        <p className="migration-instruction">DNSの適用は名前解決先を変える「切替」です。先にAPSV02へ直接HTTP疎通を確認し、切替後はクライアントで ipconfig /flushdns を実行してFQDNでも確認してください。TTL短縮後の待機はこのシミュレーションでは完了扱いですが、実環境では旧TTLの満了を待つ場合があります。</p>
+        <p className="migration-instruction">DNSの適用は名前解決先を変える「切替」です。先にAPSV02へ直接HTTP疎通を確認し、TTLだけを300秒以下に変更して適用してください。TTL短縮後の待機はシミュレーションでは完了扱いです。Aレコードを同時に変更すると旧キャッシュが残るため、切替後はnslookupとHTTP疎通で確認し、必要なら ipconfig /flushdns を実行してください。</p>
         <label className="dns-form-row"><span>接続先 IPv4 アドレス</span><select value={dnsDraft.address} onChange={(event) => onDnsDraftChange({ ...dnsDraft, address: event.target.value })}>{scenario.assets.servers.filter((item) => item.role === "application").map((item) => <option value={item.ipAddress} key={item.id}>{item.hostname} — {item.ipAddress}</option>)}</select></label>
         <label className="dns-form-row"><span>TTL</span><select value={dnsDraft.ttlSeconds} onChange={(event) => onDnsDraftChange({ ...dnsDraft, ttlSeconds: Number(event.target.value) })}><option value={86400}>24 時間 (86400 秒)</option><option value={3600}>1 時間 (3600 秒)</option><option value={300}>5 分 (300 秒)</option><option value={60}>1 分 (60 秒)</option></select></label>
         {dnsDraft.ttlSeconds > 300 && <div className="dns-warning"><AlertCircle size={14} />切替前にTTLを短縮して反映待ち時間を減らしてください。</div>}

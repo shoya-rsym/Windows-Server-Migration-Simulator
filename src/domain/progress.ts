@@ -94,7 +94,13 @@ export function calculateAuditReport(
   const missingCriticalChecks = checks.filter(
     ({ check, complete }) => !complete && ["migrate-database", "migrate-jdbc", "migrate-services", "start-resin", "cutover-dns"].includes(check.id),
   ).length;
-  const ttlMissed = !events.some((event) => event.name === "dns:ttl-lowered");
+  const cutoverIndex = events.findIndex((event) => event.name === "dns:cutover");
+  const legacyTtlPrepared = !events.some((event) => event.name === "dns:ttl-lowered-during-cutover")
+    && events.some((event, index) => event.name === "dns:ttl-lowered" && (cutoverIndex < 0 || index < cutoverIndex));
+  const ttlPreparedBeforeCutover = (scenario.assets.dns[0]?.ttlSeconds ?? Infinity) <= 300
+    || legacyTtlPrepared
+    || events.some((event, index) => event.name === "dns:ttl-prepared" && (cutoverIndex < 0 || index < cutoverIndex));
+  const ttlMissed = !ttlPreparedBeforeCutover;
   const estimatedDowntimeMinutes = missingCriticalChecks * 5 + (ttlMissed ? 30 : 0);
   const cutoverAt = events.find((event) => event.name === "dns:cutover")?.at;
   const investigationAt = events.find((event) => event.name === "investigate:events")?.at;
@@ -258,6 +264,7 @@ function getProjectFindings(
     .filter(({ event }) => event.name === "project:decision:go" || event.name === "project:decision:no-go");
   const latestDecision = decisionEvents[decisionEvents.length - 1];
   const noticeIndex = events.findIndex((event) => event.name === "project:notice-sent");
+  const cutoverCacheStale = events.some((event) => event.name === "dns:cutover-cache-stale");
   const rollbackDone = events.some((event) => event.name === "dns:rollback");
   if (rollbackDone
     && events.some((event) => event.name === "dns:rollback-cache-stale")
@@ -273,6 +280,18 @@ function getProjectFindings(
       id: "rollback-verification",
       title: "切戻し後の旧環境を本番名で確認していません",
       remediation: "DNSキャッシュを更新した後、curl http://intra.example.local:8080/ を実行し、旧APでHTTP 200になることを確認してください。",
+    });
+  }
+  if (cutoverDone && cutoverCacheStale
+    && !rollbackDone
+    && !events.some((event) => event.name === "dns:cutover-cache-flushed")) {
+    const ttlChangedDuringCutover = events.some((event) => event.name === "dns:ttl-lowered-during-cutover");
+    findings.push({
+      id: "cutover-dns-cache",
+      title: "DNS切替後もクライアントDNSキャッシュが旧APを指しています",
+      remediation: ttlChangedDuringCutover
+        ? "TTL短縮とAレコード変更を同時に適用しても、旧TTLのキャッシュは更新されません。操作端末で ipconfig /flushdns を実行してnslookupとHTTP疎通を確認してください。次回はTTLだけを先に適用し、待機後にAレコードを切り替えてください。"
+        : "操作端末で ipconfig /flushdns を実行してnslookup intra.example.local と curl http://intra.example.local:8080/ を確認してください。次回はTTLだけを先に300秒以下へ短縮し、待機後にAレコードを切り替えてください。",
     });
   }
   if (cutoverDone && (!latestDecision || latestDecision.index > cutoverIndex)) {
