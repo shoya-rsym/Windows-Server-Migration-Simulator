@@ -470,6 +470,26 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     );
     const normalized = rawCommand.trim().toLowerCase().replace(/\s+/g, " ");
 
+    if (result.databaseTransfer === "export") {
+      exportAsset(serverId, "database");
+    } else if (result.databaseTransfer === "import") {
+      if (!transfer || transfer.kind !== "database" || transfer.sourceServerId === serverId) {
+        result.output = ["ORA-39002: invalid operation", "Run expdp on the source database before importing on the target."];
+        notify("インポート用のData Pumpデータがありません。現行DBでexpdpを実行してください。");
+      } else {
+        const { schemas, revision } = transfer;
+        if (importAsset(serverId)) {
+          result.output = [
+            `Imported schemas: ${schemas.join(", ")}`,
+            `Database revision: ${revision}`,
+            "Job \"SYS_IMPORT_SCHEMA_01\" successfully completed.",
+          ];
+        } else {
+          result.output = ["ORA-39002: Data Pump import failed. Check the target database and transfer package."];
+        }
+      }
+    }
+
     if (result.clear) {
       setHistory((previous) => ({ ...previous, [serverId]: [] }));
       setInputs((previous) => ({ ...previous, [serverId]: "" }));
@@ -548,11 +568,11 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         revision: environment.databaseRevision ?? 0,
       });
     }
-    notify("エクスポート用の移行データを作成しました");
+    notify(kind === "database" ? "Data Pumpの移行データを作成しました。" : "エクスポート用の移行データを作成しました");
   };
 
   const importAsset = (serverId: string) => {
-    if (!transfer || transfer.sourceServerId === serverId) return;
+    if (!transfer || transfer.sourceServerId === serverId) return false;
     const target = environments[serverId];
     if (!target) throw new Error(`Unknown server session: ${serverId}`);
     const targetServer = scenario.assets.servers.find((item) => item.id === serverId);
@@ -561,17 +581,17 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
       const requiredPrefix = targetServer.role === "application" ? "resin " : "oracle ";
       if (!target.installedSoftware.some((item) => item.toLowerCase().startsWith(requiredPrefix))) {
         notify(`${targetServer.role === "application" ? "Resin" : "Oracle Database"}を先にインストールしてください。`);
-        return;
+        return false;
       }
     }
     if (targetServer.stage === "target" && transfer.kind === "database") {
       if (!target.databaseVersion) {
         notify("Data Pumpのインポート前に、移行先へOracle Databaseをインストールしてください。");
-        return;
+        return false;
       }
       if (!target.services.some((service) => service.name.toLowerCase().startsWith("oracleservice") && service.status === "running")) {
         notify("Data Pumpのインポート前に、services.mscでOracleサービスを起動してください。");
-        return;
+        return false;
       }
     }
 
@@ -629,6 +649,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
         : transfer.kind === "database" && sourceRevision > transfer.revision
           ? `データ世代 ${transfer.revision} を取り込みましたが、現行DBは世代 ${sourceRevision} です。最新状態を再エクスポートしてください。`
           : "移行データを取り込みました。設定値を確認してください");
+    return true;
   };
 
   const toggleService = (serverId: string, serviceId: string) => {

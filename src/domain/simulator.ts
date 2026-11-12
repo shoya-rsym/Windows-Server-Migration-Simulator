@@ -23,6 +23,7 @@ export interface ShellResult {
   clear?: boolean;
   flushDns?: boolean;
   transfer?: TransferPackage;
+  databaseTransfer?: "export" | "import";
 }
 
 export function jdbcPropertiesTargetDatabase(content: string, server: Server, database: Database): boolean {
@@ -287,6 +288,40 @@ export function runCommand(
   ) {
     return { output: ["ORA-12541: TNS:no listener", "Start the Oracle service before using SQL*Plus or Data Pump."] };
   }
+  if (args[0] === "expdp" || args[0] === "impdp") {
+    if (server.role !== "database") {
+      return { output: ["Data Pump must be run on a database server."] };
+    }
+    if (args[0] === "expdp" && server.stage !== "source") {
+      return { output: ["Run expdp on the source database. Use impdp on the target database."] };
+    }
+    if (args[0] === "impdp" && server.stage !== "target") {
+      return { output: ["Run impdp on the target database after exporting from the source database."] };
+    }
+    if (args[0] === "expdp") {
+      if (!environment.databaseSchemas.length) {
+        return { output: ["ORA-39166: No user schemas are available to export."] };
+      }
+      return {
+        output: [
+          `Export: Release ${environment.databaseVersion} - Production`,
+          `Connected to: Oracle Database ${environment.databaseVersion} on ${server.hostname}`,
+          `Exporting schemas: ${environment.databaseSchemas.join(", ")}`,
+          `Database revision: ${environment.databaseRevision}`,
+          `Job "SYS_EXPORT_SCHEMA_01" successfully completed.`,
+        ],
+        databaseTransfer: "export",
+      };
+    }
+    return {
+      output: [
+        `Import: Release ${environment.databaseVersion} - Production`,
+        `Connected to: Oracle Database ${environment.databaseVersion} on ${server.hostname}`,
+        "Data Pump import completed.",
+      ],
+      databaseTransfer: "import",
+    };
+  }
   if (args[0] === "tnsping") {
     const alias = args[1];
     const targetDatabase = scenario.assets.databases
@@ -503,11 +538,7 @@ function managerForCommand(command: string, server: Server): { app: ManagerApp; 
   if (command === "dnsmgmt.msc" && server.role === "dns") return { app: "dns", displayName: "DNS Manager" };
   if (
     command === "sqlplus" ||
-    command === "sqlplus / as sysdba" ||
-    command === "expdp" ||
-    command.startsWith("expdp ") ||
-    command === "impdp" ||
-    command.startsWith("impdp ")
+    command === "sqlplus / as sysdba"
   ) {
     return server.role === "database" ? { app: "database", displayName: "SQL*Plus" } : null;
   }
