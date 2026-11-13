@@ -8,6 +8,7 @@ import {
   createRuntimeEnvironments,
   getEventLog,
   initialDnsRuntime,
+  resinConfigTargetsEnvironment,
   runCommand,
 } from "./simulator";
 
@@ -53,6 +54,58 @@ describe("migration project workflows", () => {
       expect(output("route print")).toContain(server.ipAddress);
     },
   );
+
+  it("accepts resin.conf migration only when both target endpoints are correct", () => {
+    const sourceConfig = scenario.assets.configurationFiles.find((file) =>
+      file.serverId === sourceApplication.id && file.name === "resin.conf",
+    );
+    const targetDatabaseInfo = scenario.assets.databases.find((database) =>
+      database.serverId === targetDatabase.id,
+    );
+    if (!sourceConfig || !targetDatabaseInfo) throw new Error("Scenario Resin or target database settings are missing.");
+    const targetContent = sourceConfig.content
+      .replaceAll(sourceApplication.ipAddress, targetApplication.ipAddress)
+      .replaceAll(sourceDatabase.hostname, targetDatabase.hostname);
+
+    expect(resinConfigTargetsEnvironment(targetContent, targetApplication, targetDatabase, targetDatabaseInfo)).toBe(true);
+    expect(resinConfigTargetsEnvironment(sourceConfig.content, targetApplication, targetDatabase, targetDatabaseInfo)).toBe(false);
+    expect(resinConfigTargetsEnvironment(
+      targetContent.replace(targetApplication.ipAddress, sourceApplication.ipAddress),
+      targetApplication,
+      targetDatabase,
+      targetDatabaseInfo,
+    )).toBe(false);
+    expect(resinConfigTargetsEnvironment(
+      targetContent.replace(`${targetDatabase.hostname}:1521:ORCL`, `${targetDatabase.hostname}:1522:ORCL`),
+      targetApplication,
+      targetDatabase,
+      targetDatabaseInfo,
+    )).toBe(false);
+  });
+
+  it("does not pass the Resin migration audit on import or after a later invalid save", () => {
+    const project = createInitialProjectWorkspace(scenario.project);
+    const auditIsComplete = (events: AuditEvent[]) => calculateAuditReport(
+      scenario,
+      events,
+      0,
+      0,
+      1_000,
+      project,
+    ).checks.find((item) => item.check.id === "migrate-resin-config")?.complete;
+
+    expect(auditIsComplete([{ name: "migrate:resin-config-invalid", at: 1 }])).toBe(false);
+    expect(auditIsComplete([{ name: "migrate:resin-config", at: 1 }])).toBe(false);
+    expect(auditIsComplete([
+      { name: "migrate:resin-config-invalid", at: 1 },
+      { name: "migrate:resin-config-validated", at: 2 },
+    ])).toBe(true);
+    expect(auditIsComplete([
+      { name: "migrate:resin-config-invalid", at: 1 },
+      { name: "migrate:resin-config-validated", at: 2 },
+      { name: "migrate:resin-config-invalid", at: 3 },
+    ])).toBe(false);
+  });
 
   it("detects and resolves an expert batch incident in the simulated event log", () => {
     const environments = createExpertRuntimeEnvironments(scenario, "batch-task");

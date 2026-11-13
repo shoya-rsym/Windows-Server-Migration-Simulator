@@ -41,6 +41,7 @@ import {
   getEventLog,
   initialDnsRuntime,
   jdbcPropertiesTargetDatabase,
+  resinConfigTargetsEnvironment,
   runCommand,
   updateRuntimeServiceStartupType,
   type DnsRuntime,
@@ -639,6 +640,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       const items = transfer.items.map((file) => ({ ...file, serverId }));
       setEnvironments((previous) => ({ ...previous, [serverId]: { ...target, configurationFiles: items } }));
       setDrafts((previous) => ({ ...previous, [resinConfigDraftKey(serverId)]: items[0]?.content ?? "" }));
+      if (serverId === targetApplication?.id) recordAuditEvent("migrate:resin-config-invalid", true);
     } else if (transfer.kind === "jdbc") {
       setEnvironments((previous) => ({ ...previous, [serverId]: { ...target, jdbcProperties: transfer.content } }));
       setDrafts((previous) => ({ ...previous, [jdbcDraftKey(serverId)]: transfer.content }));
@@ -655,15 +657,15 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       }));
     }
 
-    const auditKind: Record<TransferPackage["kind"], string> = {
-      services: "migrate:services",
-      tasks: "migrate:tasks",
-      certificates: "migrate:certificates",
-      configFile: "migrate:resin-config",
-      jdbc: "migrate:jdbc",
-      database: "migrate:database",
-    };
-    if (transfer.kind !== "jdbc") recordAuditEvent(auditKind[transfer.kind]);
+    if (transfer.kind !== "jdbc" && transfer.kind !== "configFile") {
+      const auditKind: Record<Exclude<TransferPackage["kind"], "jdbc" | "configFile">, string> = {
+        services: "migrate:services",
+        tasks: "migrate:tasks",
+        certificates: "migrate:certificates",
+        database: "migrate:database",
+      };
+      recordAuditEvent(auditKind[transfer.kind]);
+    }
     if (transfer.kind === "database") {
       recordAuditEvent(transfer.strategy === "rman"
         ? "database:rman-restore"
@@ -1196,7 +1198,27 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
                     return { ...previous, [serverId]: { ...current, configurationFiles: [config] } };
                   });
                   setDrafts((previous) => ({ ...previous, [resinConfigDraftKey(serverId)]: content }));
-                  notify("resin.conf を保存しました");
+                  if (serverId === targetApplication?.id) {
+                    recordAuditEvent("migrate:resin-config-invalid", true);
+                    const targetDatabaseInfo = targetDatabase
+                      ? scenario.assets.databases.find((database) => database.serverId === targetDatabase.id)
+                      : undefined;
+                    const configurationReady = Boolean(
+                      targetApplication
+                      && targetDatabase
+                      && targetDatabaseInfo
+                      && resinConfigTargetsEnvironment(content, targetApplication, targetDatabase, targetDatabaseInfo),
+                    );
+                    if (configurationReady) recordAuditEvent("migrate:resin-config-validated", true);
+                    const databaseAddress = targetDatabase && targetDatabaseInfo
+                      ? `${targetDatabase.hostname}:${targetDatabaseInfo.listenerPort}:${targetDatabaseInfo.serviceName}`
+                      : "移行先DBの接続先";
+                    notify(configurationReady
+                      ? "resin.conf を保存し、待受アドレスとDB接続先を確認しました。"
+                      : `resin.conf を保存しました。完了には待受アドレス ${targetApplication?.ipAddress ?? "移行先APのIP"} とDB接続先 ${databaseAddress} が必要です。`);
+                  } else {
+                    notify("resin.conf を保存しました");
+                  }
                 }}
                 onTaskRun={(taskId) => runScheduledTask(serverId, taskId)}
                 onNotify={notify}
@@ -1492,7 +1514,16 @@ function ProjectDeskPanel({
           </section>
           <section className="project-section">
             <h3>構成図の接続を記録</h3>
-            <p>調査で確認した接続元・接続先を入力します。シナリオに定義された依存関係との一致は監査レポートで評価します。</p>
+            <p>下の調査手掛かりで根拠を確認してから接続元・接続先を入力します。シナリオに定義された依存関係との一致は監査レポートで評価します。</p>
+            <div className="investigation-methods">
+              <strong>接続関係の調べ方</strong>
+              <ul>
+                <li>利用者 → AD認証 → AP: このMVPにはAD管理画面がありません。案件要件のログイン方式を根拠にし、実案件ではAD担当者に確認します。</li>
+                <li>DNS → AP: APSV01で <code>nslookup intra.example.local</code> を実行し、DNS01のAレコードと照合します。</li>
+                <li>AP → Oracle DB: APSV01で <code>type jdbc.properties</code> と <code>type resin.conf</code> を実行し、ホスト・ポート・サービス名を確認します。</li>
+                <li>定期バッチ → Oracle DB: APSV01のタスク スケジューラで実行ファイルを確認します。スクリプト内容はMVPの対象外なので、案件要件または担当者にも確認します。</li>
+              </ul>
+            </div>
             <form className="project-form project-edge-form" onSubmit={addEdge}>
               <label>接続元<input list="project-components" value={edgeFrom} onChange={(event) => setEdgeFrom(event.target.value)} placeholder="例: APサーバ" /></label>
               <label>接続先<input list="project-components" value={edgeTo} onChange={(event) => setEdgeTo(event.target.value)} placeholder="例: Oracle DB" /></label>
@@ -1515,7 +1546,7 @@ function ProjectDeskPanel({
                 const strategy = event.target.value;
                 if (strategy === "expdp" || strategy === "rman" || strategy === "dataguard") update({ migrationStrategy: strategy });
               }}>
-                <option value="expdp">EXPDP / IMPDP — 停止後に差分同期が必要</option>
+                <option value="expdp">Data Pump (EXPDP / IMPDP)</option>
                 <option value="rman">RMAN — バックアップ・リストア</option>
                 <option value="dataguard">Data Guard — 同期後に切替</option>
               </select></label>
@@ -1523,7 +1554,8 @@ function ProjectDeskPanel({
               <label>切替何日前に利用者へ周知するか<input type="number" min={0} value={project.noticeLeadDays} onChange={(event) => update({ noticeLeadDays: Math.max(0, Number(event.target.value)) })} /></label>
               <label>切戻し手順・判断条件<textarea rows={4} value={project.rollbackPlan} onChange={(event) => update({ rollbackPlan: event.target.value })} placeholder="例: 23:30までにログイン確認できない場合、DNSを旧APへ戻し、旧AP/DBは翌営業日まで維持する。" /></label>
             </div>
-            <p className="project-plan-note">選択した方式はDBサーバーの端末コマンドに反映されます。Data Pumpはexpdp / impdp、RMANは rman backup / rman restore、Data Guardは dgmgrl prepare / dgmgrl start standby / dgmgrl switchover を実行してください。</p>
+            <p className="project-plan-note">案件デスクの選択はDB移行の計画方式です。Data PumpはOracleの論理エクスポート／インポート機能で、移行元の expdp がスキーマとデータを移行パッケージへ出力し、移行先の impdp が取り込みます。継続同期ではないため、業務書込みを止めた後に最新の expdp／impdp を再実行して世代をそろえます。このシミュレーターではダンプファイルを移行パッケージとして扱います。</p>
+            <p className="project-plan-note">RMANは rman backup / rman restore、Data Guardは dgmgrl prepare / dgmgrl start standby / dgmgrl switchover を実行します。</p>
             <p className="project-plan-note">TTL短縮は切替3日前以上に計画し、DNSマネージャーでTTLだけを先に適用してください。シミュレーションでは待機完了として扱いますが、計画日数とTTL適用の作業順は監査レポートで別々に確認します。</p>
             <p className={`project-limit-note ${project.plannedDowntimeMinutes > scenario.project.downtimeLimitMinutes ? "warning" : ""}`}>
               許容停止時間: {scenario.project.downtimeLimitMinutes} 分 · 現在の計画: {project.plannedDowntimeMinutes} 分
@@ -1945,7 +1977,7 @@ function ManagerWindow({
         </div>
         {server.role === "database" && environment.databaseRole === "primary" && <button className="database-write-button" onClick={() => onDatabaseWrite(server.id)}>業務更新を1件発生させる</button>}
         <p className="migration-instruction">{migrationStrategy === "expdp"
-          ? "Data Pump: 移行元でexpdp、移行先でimpdp。業務更新後は再実行して最終同期します。"
+          ? "Data PumpはOracleの論理エクスポート/インポートです。移行元でexpdp、移行先でimpdpを実行します。継続同期ではないため、最終同期では最新のexpdp/impdpを再実行します。"
           : migrationStrategy === "rman"
             ? "RMAN: 移行元で rman backup、移行先で rman restore。バックアップ後の更新は再バックアップ・リストアが必要です。"
             : "Data Guard: 移行元で dgmgrl prepare、移行先で dgmgrl start standby。更新は自動同期され、同期後に移行先で dgmgrl switchover を実行します。"}</p>

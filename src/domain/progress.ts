@@ -25,6 +25,11 @@ function lastEventIndex(events: AuditEvent[], name: string, beforeIndex = events
   return -1;
 }
 
+function hasCurrentResinConfigMigration(events: AuditEvent[]): boolean {
+  return lastEventIndex(events, "migrate:resin-config-validated")
+    > lastEventIndex(events, "migrate:resin-config-invalid");
+}
+
 function hasCompletedDatabaseMigration(strategy: ProjectWorkspace["migrationStrategy"], events: AuditEvent[]): boolean {
   const eventNames = new Set(events.map((event) => event.name));
   if (strategy === "expdp") {
@@ -44,6 +49,9 @@ function hasCompletedDatabaseMigration(strategy: ProjectWorkspace["migrationStra
 }
 
 function auditRequirementIndex(checkId: string, requiredEvent: string, scenario: Scenario, events: AuditEvent[]): number {
+  if (checkId === "migrate-resin-config" && requiredEvent === "migrate:resin-config-validated") {
+    return hasCurrentResinConfigMigration(events) ? lastEventIndex(events, requiredEvent) : -1;
+  }
   const cutoverIndex = lastEventIndex(events, "dns:cutover");
   const rollbackIndex = lastEventIndex(events, "dns:rollback");
   if (checkId === "reduce-dns-ttl" && requiredEvent === "dns:ttl-lowered") {
@@ -232,6 +240,7 @@ export function deriveTutorialEvents(
       normalize(actual.from) === normalize(expected.from) && normalize(actual.to) === normalize(expected.to),
     ),
   );
+  const resinConfigMigrationComplete = hasCurrentResinConfigMigration(events);
 
   if (cloudSetupReady) derivedEvents.push({ name: "tutorial:cloud-setup-ready", at: 0 });
   if (projectPlanReady) derivedEvents.push({ name: "tutorial:project-plan-ready", at: 0 });
@@ -243,7 +252,10 @@ export function deriveTutorialEvents(
     derivedEvents.push({ name: "tutorial:go-ready", at: 0 });
   }
   return [
-    ...events.filter((event) => event.name !== "project:notice-sent" || project.noticeSent),
+    ...events.filter((event) =>
+      (event.name !== "project:notice-sent" || project.noticeSent)
+      && (event.name !== "migrate:resin-config-validated" || resinConfigMigrationComplete),
+    ),
     ...derivedEvents,
   ];
 }
@@ -259,7 +271,7 @@ export function getTutorialInstruction(
   if (strategy === "dataguard") {
     return "案件デスクでData Guardを選び、DBSV01のSQL*Plusで「初期同期準備」、DBSV02で「Standby開始」を実行します。同期を確認してからDBSV02のCMDで dgmgrl switchover を実行してください。";
   }
-  return "案件デスクでData Pumpを選び、DBSV01のSQL*Plusで「Data Pump準備」、DBSV02で「インポート」を実行してください。業務更新が入った場合は、切替前に最新データを再同期します。";
+  return "案件デスクのDB移行方式でData Pumpを選びます。Data PumpはOracleの論理エクスポート／インポート機能で、このシミュレーターでは移行パッケージとして扱います。DBSV01のSQL*Plusで「Data Pump準備」(expdp)、DBSV02で「インポート」(impdp)を実行してください。継続同期ではないため、業務書込みを止めた後に最新データでexpdp／impdpを再実行して最終同期します。";
 }
 
 export function getModeObjective(

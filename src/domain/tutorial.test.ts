@@ -4,6 +4,7 @@ import { createInitialProjectWorkspace } from "./project";
 import {
   deriveTutorialEvents,
   getTutorialInstruction,
+  getTutorialProgress,
   getTutorialSteps,
 } from "./progress";
 import { loadScenario } from "./scenario";
@@ -28,7 +29,8 @@ describe("tutorial workflow guidance", () => {
   });
 
   it("explains the selected database migration procedure", () => {
-    expect(getTutorialInstruction(databaseStep, "expdp")).toContain("Data Pump準備");
+    expect(getTutorialInstruction(databaseStep, "expdp")).toContain("論理エクスポート");
+    expect(getTutorialInstruction(databaseStep, "expdp")).toContain("expdp／impdp");
     expect(getTutorialInstruction(databaseStep, "rman")).toContain("バックアップ");
     expect(getTutorialInstruction(databaseStep, "dataguard")).toContain("dgmgrl switchover");
   });
@@ -94,5 +96,39 @@ describe("tutorial workflow guidance", () => {
     expect(completeEvents.map((event) => event.name)).toContain("tutorial:architecture-ready");
     expect(partialEvents.map((event) => event.name)).not.toContain("tutorial:investigation-notes-ready");
     expect(partialEvents.map((event) => event.name)).not.toContain("tutorial:architecture-ready");
+  });
+
+  it("keeps the Resin migration step incomplete until a valid configuration is saved", () => {
+    const resinStep = scenario.tutorialSteps.find((step) => step.id === "migrate-resin-config");
+    if (!resinStep) throw new Error("Scenario does not define the Resin migration tutorial step.");
+    const copiedOnly = deriveTutorialEvents(
+      [{ name: "migrate:resin-config-invalid", at: 1 }],
+      scenario,
+      createInitialProjectWorkspace(scenario.project),
+      [],
+    );
+    const savedCorrectly = deriveTutorialEvents(
+      [
+        { name: "migrate:resin-config-invalid", at: 1 },
+        { name: "migrate:resin-config-validated", at: 2 },
+      ],
+      scenario,
+      createInitialProjectWorkspace(scenario.project),
+      [],
+    );
+    const correctedThenChanged = deriveTutorialEvents(
+      [
+        { name: "migrate:resin-config-invalid", at: 1 },
+        { name: "migrate:resin-config-validated", at: 2 },
+        { name: "migrate:resin-config-invalid", at: 3 },
+      ],
+      scenario,
+      createInitialProjectWorkspace(scenario.project),
+      [],
+    );
+
+    expect(getTutorialProgress([resinStep], copiedOnly).activeStep).toBe(resinStep);
+    expect(getTutorialProgress([resinStep], savedCorrectly).activeStep).toBeUndefined();
+    expect(getTutorialProgress([resinStep], correctedThenChanged).activeStep).toBe(resinStep);
   });
 });

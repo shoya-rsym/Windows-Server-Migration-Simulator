@@ -44,6 +44,24 @@ function databaseUrlTargetsDatabase(url: string, server: Server, database: Datab
   );
 }
 
+export function resinConfigTargetsEnvironment(
+  content: string,
+  application: Server,
+  database: Server,
+  databaseConfig: Database,
+): boolean {
+  const serverElement = content.match(/<server\b[^>]*>/i)?.[0];
+  const listenAddress = serverElement?.match(/\baddress\s*=\s*['"]([^'"]+)['"]/i)?.[1];
+  const databaseUrl = content.match(/jdbc:oracle:thin:@[^/\s'"]+/i)?.[0];
+  return listenAddress === application.ipAddress
+    && Boolean(databaseUrl && databaseUrlTargetsDatabase(databaseUrl, database, databaseConfig));
+}
+
+function resinConfigTargetsListenAddress(content: string, ipAddress: string): boolean {
+  const serverElement = content.match(/<server\b[^>]*>/i)?.[0];
+  return serverElement?.match(/\baddress\s*=\s*['"]([^'"]+)['"]/i)?.[1] === ipAddress;
+}
+
 export const initialJdbcProperties =
   "jdbc.url=jdbc:oracle:thin:@DBSV01:1521:ORCL\njdbc.user=IMART\njdbc.password=${DB_PASSWORD}";
 
@@ -496,7 +514,9 @@ function applicationHealthIssues(
   const resin = environment.services.find((service) => service.name.toLowerCase().includes("resin"));
   if (!resin || resin.status !== "running") issues.push("Resin Windowsサービスが存在しないか、停止しています。");
   const resinConfig = environment.configurationFiles.find((file) => file.name.toLowerCase() === "resin.conf");
-  if (!resinConfig?.content.includes(application.ipAddress)) issues.push(`resin.conf の待受アドレスが ${application.ipAddress} ではありません。`);
+  if (!resinConfig || !resinConfigTargetsListenAddress(resinConfig.content, application.ipAddress)) {
+    issues.push(`resin.conf の待受アドレスが ${application.ipAddress} ではありません。`);
+  }
 
   const sourceApplication = scenario.assets.servers.find((item) =>
     item.role === "application" && item.stage === "source",
@@ -581,7 +601,7 @@ export function getEventLog(
   }
 
   const resinConfig = environment.configurationFiles.find((file) => file.name.toLowerCase() === "resin.conf");
-  if (!resinConfig?.content.includes(server.ipAddress)) {
+  if (!resinConfig || !resinConfigTargetsListenAddress(resinConfig.content, server.ipAddress)) {
     events.push({ source: "Resin", type: "Error", message: `resin.conf の待受アドレスが ${server.ipAddress} ではありません。` });
   }
 
