@@ -11,7 +11,6 @@ import {
   ChevronDown,
   ClipboardList,
   Clock3,
-  Cloud,
   Database,
   FolderOpen,
   FileKey2,
@@ -46,7 +45,7 @@ import {
   updateRuntimeServiceStartupType,
   type DnsRuntime,
 } from "./domain/simulator";
-import { createInitialCloudWorkspace } from "./domain/cloud";
+import { createInitialCloudWorkspace, isCloudWorkspaceReady } from "./domain/cloud";
 import type {
   Certificate,
   CloudWorkspace,
@@ -116,13 +115,13 @@ function resinConfigDraftKey(serverId: string): string {
 
 function getAvailableServers(scenario: Scenario, provider: DeploymentProvider, workspace: CloudWorkspace): Server[] {
   return scenario.assets.servers.filter((server) =>
-    provider !== "aws"
+    provider === "onprem"
     || server.stage !== "target"
     || (workspace.instanceServerIds.includes(server.id) && workspace.securityGroupPorts.includes(3389)),
   );
 }
 
-function createLegacyAwsWorkspace(scenario: Scenario): CloudWorkspace {
+function createLegacyCloudWorkspace(scenario: Scenario): CloudWorkspace {
   const targetServers = scenario.assets.servers.filter((server) => server.stage === "target");
   const firstIp = targetServers[0]?.ipAddress.split(".") ?? ["10", "10", "2", "0"];
   return {
@@ -132,6 +131,14 @@ function createLegacyAwsWorkspace(scenario: Scenario): CloudWorkspace {
     securityGroupPorts: [3389, 8080, 1521],
     instanceServerIds: targetServers.map((server) => server.id),
   };
+}
+
+function isEmptyCloudWorkspace(workspace: CloudWorkspace): boolean {
+  return !workspace.vpcCidr
+    && !workspace.subnetCidr
+    && !workspace.securityGroupCreated
+    && workspace.securityGroupPorts.length === 0
+    && workspace.instanceServerIds.length === 0;
 }
 
 function App({ advisor = defaultAdvisor }: { advisor?: Advisor } = {}) {
@@ -301,8 +308,10 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     if (!storedSave) return;
     setMode(storedSave.mode);
     setProvider(storedSave.provider);
-    setCloudWorkspace(storedSave.cloudWorkspace
-      ?? (storedSave.provider === "aws" ? createLegacyAwsWorkspace(scenario) : createInitialCloudWorkspace()));
+    const savedCloudWorkspace = storedSave.cloudWorkspace ?? createInitialCloudWorkspace();
+    setCloudWorkspace(storedSave.provider !== "onprem" && isEmptyCloudWorkspace(savedCloudWorkspace)
+      ? createLegacyCloudWorkspace(scenario)
+      : savedCloudWorkspace);
     setPaneServerIds(storedSave.paneServerIds);
     setEnvironments(Object.fromEntries(Object.entries(storedSave.environments).map(([serverId, environment]) => {
       const server = scenario.assets.servers.find((item) => item.id === serverId);
@@ -403,7 +412,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       environment,
       environments,
       dns,
-      provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
+      provider !== "onprem" ? cloudWorkspace.securityGroupPorts : undefined,
       projectWorkspace.migrationStrategy,
     );
     const normalized = rawCommand.trim().toLowerCase().replace(/\s+/g, " ");
@@ -894,7 +903,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       environment,
       environments,
       dns,
-      provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
+      provider !== "onprem" ? cloudWorkspace.securityGroupPorts : undefined,
     ).length > 0;
   });
 
@@ -918,7 +927,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       targetEnvironment,
       environments,
       dns,
-      provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined,
+      provider !== "onprem" ? cloudWorkspace.securityGroupPorts : undefined,
     ).length
     : 0;
   const databaseRevisions = sourceDatabase && targetDatabase
@@ -944,6 +953,8 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     databaseRevisions,
   );
   const availableServers = getAvailableServers(scenario, provider, cloudWorkspace);
+  const cloudTargets = scenario.assets.servers.filter((server) => server.stage === "target" && server.role !== "dns");
+  const cloudSetupReady = provider === "onprem" || isCloudWorkspaceReady(cloudWorkspace, cloudTargets);
 
   if (screen === "desktop") {
     return (
@@ -955,12 +966,14 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         availableServers={availableServers}
         saved={storedSave}
         cloudWorkspace={cloudWorkspace}
+        cloudSetupReady={cloudSetupReady}
         storageError={storageError}
         scenario={scenario}
         scenarios={scenarios}
         onScenarioChange={onScenarioChange}
         onModeChange={setMode}
         onProviderChange={(nextProvider) => {
+          if (provider !== nextProvider) setCloudWorkspace(createInitialCloudWorkspace());
           setProvider(nextProvider);
           if (!getAvailableServers(scenario, nextProvider, cloudWorkspace).some((server) => server.id === desktopServerId)) {
             setDesktopServerId(sourceApplication?.id ?? initialPanes[0]);
@@ -974,7 +987,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           else if (isManagerShortcut(shortcut) && sourceApplication) setDesktopServerId(sourceApplication.id);
         }}
         onServerChange={setDesktopServerId}
-        onStart={() => startFreshSession()}
+        onStart={() => { if (cloudSetupReady) startFreshSession(); }}
         onContinue={continueSession}
         onStartOver={() => startFreshSession(true)}
       />
@@ -1045,7 +1058,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
                 environment={environment}
                 environments={environments}
                 dns={dns}
-                allowedInboundPorts={provider === "aws" ? cloudWorkspace.securityGroupPorts : undefined}
+                allowedInboundPorts={provider !== "onprem" ? cloudWorkspace.securityGroupPorts : undefined}
                 dnsDraft={dnsDraft}
                 scenario={scenario}
                 history={history[serverId] ?? []}
@@ -1225,6 +1238,7 @@ function DesktopHome({
   availableServers,
   saved,
   cloudWorkspace,
+  cloudSetupReady,
   storageError,
   scenario,
   scenarios,
@@ -1245,6 +1259,7 @@ function DesktopHome({
   availableServers: Server[];
   saved: SimulationSave | null;
   cloudWorkspace: CloudWorkspace;
+  cloudSetupReady: boolean;
   storageError: string | null;
   scenario: Scenario;
   scenarios: Scenario[];
@@ -1271,6 +1286,11 @@ function DesktopHome({
     { id: "resinConfig", label: "resin.conf", icon: <FileText size={22} /> },
   ];
   const selectedLabel = shortcuts.find((item) => item.id === shortcut)?.label ?? "CMD";
+  const targetServers = scenario.assets.servers.filter((server) => server.stage === "target" && server.role !== "dns");
+  const targetIps = targetServers.map((server) => `${server.hostname} ${server.ipAddress}`).join(" / ");
+  const targetNetwork = targetServers[0]?.ipAddress.split(".") ?? ["10", "10", "2", "0"];
+  const exampleVpc = `${targetNetwork[0]}.${targetNetwork[1]}.0.0/16`;
+  const exampleSubnet = `${targetNetwork[0]}.${targetNetwork[1]}.${targetNetwork[2]}.0/24`;
   const modeDescriptions: Record<DifficultyMode, string> = {
     tutorial: "AI上司が手順を案内し、実行後に確認目的を解説します。",
     beginner: "達成する目的だけを表示します。調査方法は自分で考えます。",
@@ -1292,24 +1312,13 @@ function DesktopHome({
           <button className="desktop-icon recycle-icon" onClick={() => onShortcutChange("explorer")}><span>♲</span><small>ごみ箱</small></button>
         </div>
 
-        {provider === "aws" && <AwsConsole
+        {(provider === "aws" || provider === "azure") && <AwsConsole
+          provider={provider}
           servers={scenario.assets.servers}
           workspace={cloudWorkspace}
           onChange={onCloudWorkspaceChange}
           onConnect={(targetId) => { onServerChange(targetId); onShortcutChange("cmd"); }}
         />}
-        {provider === "azure" && (
-          <section className="cloud-console azure">
-            <div className="cloud-console-top"><Cloud size={17} /><strong>Microsoft Azure</strong><span>training-lab</span></div>
-            <div className="cloud-console-title"><small>Virtual machines</small><strong>仮想マシン</strong></div>
-            {scenario.assets.servers.filter((server) => server.role !== "dns").map((server) => (
-              <div className="cloud-resource" key={server.id}>
-                <span className="cloud-running-dot" /><strong>{server.hostname}</strong><small>{server.operatingSystem}</small><span>{server.ipAddress}</span>
-                <button onClick={() => { onServerChange(server.id); onShortcutChange("cmd"); }}>RDP</button>
-              </div>
-            ))}
-          </section>
-        )}
 
         <section className="desktop-connect-window">
           <div className="desktop-window-title"><div><Monitor size={15} /><strong>Windows Server Migration Lab</strong></div><span>─　□　×</span></div>
@@ -1320,11 +1329,22 @@ function DesktopHome({
             <label className="desktop-setting-row"><span>接続先</span><select value={selectedServer?.id ?? availableServers[0]?.id ?? ""} onChange={(event) => onServerChange(event.target.value)}>{availableServers.map((server) => <option value={server.id} key={server.id}>{server.hostname} — {server.role}</option>)}</select></label>
             <label className="desktop-setting-row"><span>難易度</span><select value={mode} onChange={(event) => onModeChange(event.target.value as DifficultyMode)}><option value="tutorial">チュートリアル</option><option value="beginner">初級</option><option value="intermediate">中級</option><option value="advanced">上級</option><option value="expert">エキスパート</option></select></label>
             <div className="mode-description"><strong>{modeLabel(mode)}</strong><span>{modeDescriptions[mode]}</span></div>
+            {mode === "tutorial" && provider !== "onprem" && <section className="cloud-start-tutorial" aria-labelledby="cloud-start-tutorial-title">
+              <strong id="cloud-start-tutorial-title">開始前に {provider === "aws" ? "AWS" : "Azure"} 基盤を準備します</strong>
+              <p>右上のクラウド画面で、上から順に設定してください。これは学習用の疑似環境で、実クラウドには接続しません。</p>
+              <ol>
+                <li><b>ネットワーク</b>: {exampleVpc} を作成し、次に {exampleSubnet} のサブネットを作成します。移行先の固定IPがこの範囲に入る必要があります。</li>
+                <li><b>ファイアウォール</b>: ファイアウォールタブで TCP 3389 (RDP)、8080 (AP疎通)、1521 (Oracle接続) を許可します。実環境では接続元を必要な範囲に制限してください。</li>
+                <li><b>VM起動</b>: VMタブで対象を1台ずつ起動します。{targetIps} の{targetServers.length}台が起動し、必要な通信ルールがそろうと開始できます。</li>
+              </ol>
+              <p className="cloud-start-why">ネットワーク → 通信許可 → サーバーの順に作るのは、VMが使うIP範囲と接続経路を先に確定するためです。</p>
+            </section>}
             <div className="selected-shortcut"><span className="shortcut-window-icon"><Terminal size={17} /></span><div><small>デスクトップ アプリ / 接続先</small><strong>{selectedLabel} → {selectedServer?.hostname ?? availableServers[0]?.hostname}</strong></div><span className="rdp-target">{provider === "aws" ? "EC2 / RDP" : provider === "azure" ? "Azure VM / RDP" : "RDP / Windows Server"}</span></div>
             <div className="desktop-connect-actions">
               {saved && <button className="desktop-continue" onClick={onContinue}><Play size={14} />続きから始める</button>}
-              <button className="desktop-start" onClick={onStart}><ArrowRight size={15} />{saved ? "最初から開始" : "RDP接続して開始"}</button>
+              <button className="desktop-start" disabled={!cloudSetupReady} onClick={onStart}><ArrowRight size={15} />{saved ? "最初から開始" : "RDP接続して開始"}</button>
             </div>
+            {!cloudSetupReady && provider !== "onprem" && <p className="cloud-start-blocked" role="status">クラウド基盤の構築が完了すると開始できます。VMタブで起動状態を、ファイアウォールタブで必要ポートを確認してください。</p>}
             {storageError && <p className="storage-warning" role="status">セーブデータ: {storageError}</p>}
             <p className="desktop-safety"><LockKeyhole size={12} />このアプリ内の疑似環境です。実サーバーやクラウドへ接続しません。</p>
           </div>

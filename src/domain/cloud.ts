@@ -1,9 +1,11 @@
-import type { CloudWorkspace } from "./models";
+import type { CloudWorkspace, Server } from "./models";
 
 interface IPv4Cidr {
   network: number;
   prefix: number;
 }
+
+export const requiredCloudInboundPorts = [3389, 8080, 1521] as const;
 
 export function createInitialCloudWorkspace(): CloudWorkspace {
   return {
@@ -13,6 +15,17 @@ export function createInitialCloudWorkspace(): CloudWorkspace {
     securityGroupPorts: [],
     instanceServerIds: [],
   };
+}
+
+export function isCloudWorkspaceReady(workspace: CloudWorkspace, targetServers: Server[]): boolean {
+  return targetServers.length > 0
+    && Boolean(workspace.vpcCidr && workspace.subnetCidr && workspace.securityGroupCreated)
+    && requiredCloudInboundPorts.every((port) => workspace.securityGroupPorts.includes(port))
+    && targetServers.every((server) =>
+      workspace.instanceServerIds.includes(server.id)
+      && workspace.subnetCidr !== null
+      && isAddressInCidr(server.ipAddress, workspace.subnetCidr),
+    );
 }
 
 function parseIPv4(address: string): number | null {
