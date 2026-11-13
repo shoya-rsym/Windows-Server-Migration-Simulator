@@ -182,6 +182,23 @@ export interface TutorialProgress {
   completedCount: number;
 }
 
+export function getTutorialSteps(
+  steps: TutorialStep[],
+  strategy: ProjectWorkspace["migrationStrategy"],
+  includeCloudSetup: boolean,
+): TutorialStep[] {
+  const cloudSetupStep: TutorialStep = {
+    id: "prepare-cloud-infrastructure",
+    instruction: "開始前にクラウド画面でネットワーク、サブネット、ファイアウォール、移行先VMを準備します。画面右上の構築順序と設定例を確認してください。",
+    requiredEvents: ["tutorial:cloud-setup-ready"],
+    explanation: "移行先VMは、移行対象の固定IPが入るネットワークと、RDP・AP・Oracleの必要通信を先に用意してから起動します。",
+  };
+  const scenarioSteps = steps.map((step) => step.id === "migrate-database" && strategy === "dataguard"
+    ? { ...step, requiredEvents: [...step.requiredEvents, "database:dataguard-switchover"] }
+    : step);
+  return includeCloudSetup ? [cloudSetupStep, ...scenarioSteps] : scenarioSteps;
+}
+
 export function getTutorialProgress(steps: TutorialStep[], events: AuditEvent[]): TutorialProgress {
   const isComplete = (step: TutorialStep) =>
     step.requiredEvents.every((required) => events.some((event) => event.name === required));
@@ -191,6 +208,48 @@ export function getTutorialProgress(steps: TutorialStep[], events: AuditEvent[])
     previousStep: activeIndex <= 0 ? undefined : steps[activeIndex - 1],
     completedCount: steps.filter(isComplete).length,
   };
+}
+
+export function deriveTutorialEvents(
+  events: AuditEvent[],
+  scenario: Scenario,
+  project: ProjectWorkspace,
+  readinessItems: CutoverReadinessItem[],
+  cloudSetupReady = false,
+): AuditEvent[] {
+  const derivedEvents: AuditEvent[] = [];
+  const projectPlanReady = project.plannedDowntimeMinutes > 0
+    && project.plannedDowntimeMinutes <= scenario.project.downtimeLimitMinutes
+    && project.maintenanceWindow.trim().length > 0
+    && project.ttlLeadDays >= 3
+    && project.noticeLeadDays >= 1
+    && project.rollbackPlan.trim().length >= 20;
+
+  if (cloudSetupReady) derivedEvents.push({ name: "tutorial:cloud-setup-ready", at: 0 });
+  if (projectPlanReady) derivedEvents.push({ name: "tutorial:project-plan-ready", at: 0 });
+  if (project.cutoverDecision === "go"
+    && readinessItems.length > 0
+    && readinessItems.every((item) => item.ready)) {
+    derivedEvents.push({ name: "tutorial:go-ready", at: 0 });
+  }
+  return [
+    ...events.filter((event) => event.name !== "project:notice-sent" || project.noticeSent),
+    ...derivedEvents,
+  ];
+}
+
+export function getTutorialInstruction(
+  step: TutorialStep | undefined,
+  strategy: ProjectWorkspace["migrationStrategy"],
+): string | undefined {
+  if (!step || step.id !== "migrate-database") return step?.instruction;
+  if (strategy === "rman") {
+    return "案件デスクでRMANを選び、DBSV01のSQL*Plusで「バックアップ」、DBSV02で「リストア」を実行してください。バックアップ後に旧DBへ更新があれば、切替前に再バックアップ・リストアします。";
+  }
+  if (strategy === "dataguard") {
+    return "案件デスクでData Guardを選び、DBSV01のSQL*Plusで「初期同期準備」、DBSV02で「Standby開始」を実行します。同期を確認してからDBSV02のCMDで dgmgrl switchover を実行してください。";
+  }
+  return "案件デスクでData Pumpを選び、DBSV01のSQL*Plusで「Data Pump準備」、DBSV02で「インポート」を実行してください。業務更新が入った場合は、切替前に最新データを再同期します。";
 }
 
 export function getModeObjective(

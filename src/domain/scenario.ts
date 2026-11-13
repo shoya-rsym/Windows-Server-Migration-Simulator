@@ -1,6 +1,30 @@
 import { z } from "zod";
 import type { Scenario } from "./models";
 
+const tutorialOnlyEvents = new Set([
+  "inspect:hostname:source",
+  "verify:post-cutover",
+  "project:notice-sent",
+  "start:oracle-service",
+  "tutorial:project-plan-ready",
+  "tutorial:go-ready",
+]);
+
+function isTutorialOnlyEvent(event: string, scenario: Scenario): boolean {
+  if (tutorialOnlyEvents.has(event)) return true;
+  if (!event.startsWith("install:middleware:")) return false;
+  const serverAndSoftware = event.slice("install:middleware:".length);
+  const separator = serverAndSoftware.indexOf(":");
+  if (separator < 1) return false;
+  const serverId = serverAndSoftware.slice(0, separator);
+  const softwareName = serverAndSoftware.slice(separator + 1);
+  return scenario.assets.servers.some((server) =>
+    server.id === serverId
+    && server.stage === "target"
+    && server.software.includes(softwareName),
+  );
+}
+
 function addDuplicateIssues(
   values: string[],
   context: z.RefinementCtx,
@@ -344,7 +368,7 @@ const scenarioSchema = z.object({
     addDuplicateIssues(step.requiredEvents, context, ["tutorialSteps", index, "requiredEvents"], "チュートリアル完了イベント");
     step.requiredEvents.forEach((event) => {
       if (!scenario.auditChecks.some((check) => check.requiredEvents.includes(event))
-        && !["inspect:hostname:source", "verify:post-cutover"].includes(event)) {
+        && !isTutorialOnlyEvent(event, scenario)) {
         context.addIssue({
           code: "custom",
           message: `チュートリアルの完了イベントが見つかりません: ${event}`,

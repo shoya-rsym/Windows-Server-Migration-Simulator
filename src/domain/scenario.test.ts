@@ -30,4 +30,11 @@ describe("scenario integrity validation", () => {
 
     expect(() => loadScenario(invalidScenario)).toThrow("障害を再現するための移行元資産がありません: task");
   });
+
+  it("rejects tutorial completion events without a matching operation", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    invalidScenario.tutorialSteps[0].requiredEvents = ["migration:unknown-operation"];
+
+    expect(() => loadScenario(invalidScenario)).toThrow("チュートリアルの完了イベントが見つかりません");
+  });
 });

@@ -70,9 +70,12 @@ import { createInitialProjectWorkspace } from "./domain/project";
 import { parseSimulationSave, type SimulationSave } from "./domain/save";
 import {
   calculateAuditReport,
+  deriveTutorialEvents,
   getCutoverReadiness,
   getModeObjective,
+  getTutorialInstruction,
   getTutorialProgress,
+  getTutorialSteps,
   type AuditEvent,
   type CutoverReadinessItem,
   type KnowledgeRecord,
@@ -714,6 +717,11 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     if (serverId === targetApplication?.id && service?.name.toLowerCase().includes("resin") && service.status === "stopped") {
       recordAuditEvent("start:resin-service");
     }
+    if (serverId === targetDatabase?.id
+      && service?.name.toLowerCase().startsWith("oracleservice")
+      && service.status === "stopped") {
+      recordAuditEvent("start:oracle-service");
+    }
     setEnvironments((previous) => ({
       ...previous,
       [serverId]: {
@@ -908,16 +916,6 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   });
 
   const activeObjective = getModeObjective(mode, scenario.learningObjectives, completedObjectives, scenario.learningOrderByMode);
-  const tutorialProgress = getTutorialProgress(scenario.tutorialSteps, auditEvents);
-  const modePrompt = mode === "tutorial"
-    ? tutorialProgress.activeStep?.instruction || "チュートリアルの手順は完了です。作業監査レポートで結果を確認してください。"
-    : mode === "beginner"
-      ? activeObjective?.beginnerInstruction || "調査項目を確認しました。移行作業を続けてください。"
-      : mode === "intermediate"
-        ? "Windows Server 2016 から 2019 へ更改してください。OS・実行環境・DB・依存関係を調査し、構成図と移行計画にまとめてください。確認順やコマンド例は表示されません。"
-        : mode === "advanced"
-          ? "切替後、ログインできません。"
-          : scenario.incidents.find((incident) => incident.id === expertIncidentId)?.description ?? "業務システムで障害が発生しています。ログと構成から原因を特定してください。";
   const targetServer = targetApplication;
   const targetEnvironment = targetServer ? environments[targetServer.id] : undefined;
   const incidentCount = targetServer && targetEnvironment
@@ -955,6 +953,29 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   const availableServers = getAvailableServers(scenario, provider, cloudWorkspace);
   const cloudTargets = scenario.assets.servers.filter((server) => server.stage === "target" && server.role !== "dns");
   const cloudSetupReady = provider === "onprem" || isCloudWorkspaceReady(cloudWorkspace, cloudTargets);
+  const tutorialSteps = getTutorialSteps(
+    scenario.tutorialSteps,
+    projectWorkspace.migrationStrategy,
+    provider !== "onprem",
+  );
+  const tutorialEvents = deriveTutorialEvents(
+    auditEvents,
+    scenario,
+    projectWorkspace,
+    cutoverReadiness,
+    provider !== "onprem" && cloudSetupReady,
+  );
+  const tutorialProgress = getTutorialProgress(tutorialSteps, tutorialEvents);
+  const modePrompt = mode === "tutorial"
+    ? getTutorialInstruction(tutorialProgress.activeStep, projectWorkspace.migrationStrategy)
+      || "チュートリアルの手順は完了です。作業監査レポートで結果を確認してください。"
+    : mode === "beginner"
+      ? activeObjective?.beginnerInstruction || "調査項目を確認しました。移行作業を続けてください。"
+      : mode === "intermediate"
+        ? "Windows Server 2016 から 2019 へ更改してください。OS・実行環境・DB・依存関係を調査し、構成図と移行計画にまとめてください。確認順やコマンド例は表示されません。"
+        : mode === "advanced"
+          ? "切替後、ログインできません。"
+          : scenario.incidents.find((incident) => incident.id === expertIncidentId)?.description ?? "業務システムで障害が発生しています。ログと構成から原因を特定してください。";
 
   if (screen === "desktop") {
     return (
@@ -1040,7 +1061,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
               {advisorFeedback && <span className="advisor-feedback" role="status">{advisorFeedback}</span>}
             </>}
           </div>
-          {mode === "tutorial" && <span className="supervisor-progress">{tutorialProgress.completedCount}/{scenario.tutorialSteps.length} 手順</span>}
+          {mode === "tutorial" && <span className="supervisor-progress">{tutorialProgress.completedCount}/{tutorialSteps.length} 手順</span>}
         </section>
 
         <div className="session-grid">
