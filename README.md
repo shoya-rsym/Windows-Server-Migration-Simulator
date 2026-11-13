@@ -45,8 +45,9 @@ type jdbc.properties
 ```
 
 - **services.msc** — サービス状態、起動種類、実行ユーザーの確認と起動・停止。
-- **移行先のミドルウェア導入** — クイックバーの「セットアップ」または`appwiz.cpl`からシナリオ定義のソフトウェアを導入します。APサーバーはJavaを先に導入してからResinをインストールし、services.mscでResinを起動します。DBサーバーはOracle導入後にサービスを起動し、`lsnrctl status`でListenerを確認してからData Pumpを実行します。
-- **taskschd.msc** — 実行ファイル、スケジュール、実行ユーザー、結果の確認・実行。
+- **services.msc** — サービスの起動・停止に加え、起動種類を「自動 / 手動」に変更できます。新APではResinを自動起動に設定し、起動後の状態を確認してください。
+- **移行先のミドルウェア導入** — クイックバーの「セットアップ」または`appwiz.cpl`からシナリオ定義のソフトウェアを導入します。APサーバーはJavaを先に導入してからResinをインストールします。DBサーバーはOracle導入後にサービスを起動し、`lsnrctl status`でListenerを確認してからData Pumpを実行します。
+- **taskschd.msc** — 実行ファイル、スケジュール、実行ユーザーを確認し、移行したタスクを「試運転」して結果を記録します。自動起動設定とタスク試運転は運用品質と監査レポートに反映されます。
 - **certlm.msc** — 個人・中間CA・信頼されたルートの証明書、有効期限、秘密鍵の比較・移行。
 - **eventvwr.msc** — 切替後の状態に応じたイベントログから障害を調査。
 - **notepad resin.conf / jdbc.properties** — 旧・新設定を比較し、編集・保存・移行。新APではresin.confの待受IPとDB接続先、jdbc.propertiesのDB接続先をそれぞれ新環境に合わせます。

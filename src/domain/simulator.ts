@@ -7,6 +7,7 @@ import type {
   ManagerApp,
   RuntimeEnvironment,
   RuntimeEnvironments,
+  RuntimeService,
   Scenario,
   Server,
   TransferPackage,
@@ -81,6 +82,22 @@ export function createRuntimeEnvironments(scenario: Scenario): RuntimeEnvironmen
       } satisfies RuntimeEnvironment,
     ]),
   );
+}
+
+export function updateRuntimeServiceStartupType(
+  environment: RuntimeEnvironment,
+  serviceId: string,
+  startupType: RuntimeService["startupType"],
+): RuntimeEnvironment {
+  if (!environment.services.some((service) => service.id === serviceId)) {
+    throw new Error(`Unknown runtime service: ${serviceId}`);
+  }
+  return {
+    ...environment,
+    services: environment.services.map((service) =>
+      service.id === serviceId ? { ...service, startupType } : service,
+    ),
+  };
 }
 
 export function chooseExpertIncident(scenario: Scenario, random: () => number = Math.random): IncidentDefinition {

@@ -41,6 +41,7 @@ import {
   initialDnsRuntime,
   jdbcPropertiesTargetDatabase,
   runCommand,
+  updateRuntimeServiceStartupType,
   type DnsRuntime,
 } from "./domain/simulator";
 import { createInitialCloudWorkspace } from "./domain/cloud";
@@ -709,6 +710,29 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     }));
   };
 
+  const changeServiceStartupType = (
+    serverId: string,
+    serviceId: string,
+    startupType: RuntimeService["startupType"],
+  ) => {
+    const current = environments[serverId];
+    if (!current) throw new Error(`Unknown server session: ${serverId}`);
+    const updated = updateRuntimeServiceStartupType(current, serviceId, startupType);
+    setEnvironments((previous) => ({ ...previous, [serverId]: updated }));
+    if (serverId === targetApplication?.id && startupType === "automatic") {
+      recordAuditEvent("verify:service-startup", true);
+    }
+  };
+
+  const runScheduledTask = (serverId: string, taskId: string) => {
+    const environment = environments[serverId];
+    if (!environment?.tasks.some((task) => task.id === taskId)) {
+      throw new Error(`Unknown scheduled task: ${taskId}`);
+    }
+    setTaskRuns((previous) => ({ ...previous, [taskId]: "成功" }));
+    if (serverId === targetApplication?.id) recordAuditEvent("verify:task-run", true);
+  };
+
   const installMiddleware = (serverId: string, softwareName: string) => {
     const server = scenario.assets.servers.find((item) => item.id === serverId);
     const environment = environments[serverId];
@@ -1006,6 +1030,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                 onExport={exportAsset}
                 onImport={importAsset}
                 onServiceToggle={toggleService}
+                onServiceStartupTypeChange={changeServiceStartupType}
                 onSoftwareInstall={installMiddleware}
                 onDatabaseWrite={recordBusinessWrite}
                 onDnsDraftChange={setDnsDraft}
@@ -1103,7 +1128,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
                   setDrafts((previous) => ({ ...previous, [resinConfigDraftKey(serverId)]: content }));
                   notify("resin.conf を保存しました");
                 }}
-                onTaskRun={(taskId) => setTaskRuns((previous) => ({ ...previous, [taskId]: "成功" }))}
+                onTaskRun={(taskId) => runScheduledTask(serverId, taskId)}
                 onNotify={notify}
                 onCloseApp={() => openApp(serverId, null)}
               />
@@ -1560,6 +1585,7 @@ function ServerSession({
   onExport,
   onImport,
   onServiceToggle,
+  onServiceStartupTypeChange,
   onSoftwareInstall,
   onDatabaseWrite,
   onDnsDraftChange,
@@ -1595,6 +1621,7 @@ function ServerSession({
   onExport: (serverId: string, kind: TransferPackage["kind"], content?: string) => void;
   onImport: (serverId: string) => void;
   onServiceToggle: (serverId: string, serviceId: string) => void;
+  onServiceStartupTypeChange: (serverId: string, serviceId: string, startupType: RuntimeService["startupType"]) => void;
   onSoftwareInstall: (serverId: string, softwareName: string) => void;
   onDatabaseWrite: (serverId: string) => void;
   onDnsDraftChange: (dns: DnsRuntime) => void;
@@ -1653,6 +1680,7 @@ function ServerSession({
             onExport={onExport}
             onImport={onImport}
             onServiceToggle={onServiceToggle}
+            onServiceStartupTypeChange={onServiceStartupTypeChange}
             onSoftwareInstall={onSoftwareInstall}
             onDatabaseWrite={onDatabaseWrite}
             onDnsDraftChange={onDnsDraftChange}
@@ -1697,6 +1725,7 @@ function ManagerWindow({
   onExport,
   onImport,
   onServiceToggle,
+  onServiceStartupTypeChange,
   onSoftwareInstall,
   onDatabaseWrite,
   onDnsDraftChange,
@@ -1722,6 +1751,7 @@ function ManagerWindow({
   onExport: (serverId: string, kind: TransferPackage["kind"], content?: string, databaseStrategy?: DatabaseMigrationStrategy) => void;
   onImport: (serverId: string) => void;
   onServiceToggle: (serverId: string, serviceId: string) => void;
+  onServiceStartupTypeChange: (serverId: string, serviceId: string, startupType: RuntimeService["startupType"]) => void;
   onSoftwareInstall: (serverId: string, softwareName: string) => void;
   onDatabaseWrite: (serverId: string) => void;
   onDnsDraftChange: (dns: DnsRuntime) => void;
@@ -1755,7 +1785,7 @@ function ManagerWindow({
       <div className="mmc-menubar"><span>ファイル</span><span>操作</span><span>表示</span><span>ヘルプ</span></div>
       {app === "services" && <ManagerFrame title="サービス (ローカル)" icon={<Settings size={15} />}>
         <div className="manager-toolbar service-columns"><span>名前</span><span>状態</span><span>起動種類</span><span>実行ユーザー</span><span>操作</span></div>
-        {environment.services.length ? environment.services.map((service) => <div className="manager-row service-columns" key={service.id}><div className="manager-primary"><Settings size={14} /><span><strong>{service.displayName}</strong><small>{service.name}</small></span></div><span className={`service-state ${service.status}`}>{service.status === "running" ? "実行中" : "停止"}</span><span className="table-muted">{service.startupType === "automatic" ? "自動" : "手動"}</span><span className="table-muted">{service.runAs}</span><button className="row-action" onClick={() => onServiceToggle(server.id, service.id)}><Power size={12} />{service.status === "running" ? "停止" : "開始"}</button></div>) : <EmptyManager text="サービスは見つかりませんでした。" /> }
+        {environment.services.length ? environment.services.map((service) => <div className="manager-row service-columns" key={service.id}><div className="manager-primary"><Settings size={14} /><span><strong>{service.displayName}</strong><small>{service.name}</small></span></div><span className={`service-state ${service.status}`}>{service.status === "running" ? "実行中" : "停止"}</span><select className="service-startup-select" aria-label={`${service.displayName}の起動種類`} value={service.startupType} onChange={(event) => onServiceStartupTypeChange(server.id, service.id, event.currentTarget.value === "automatic" ? "automatic" : "manual")}><option value="automatic">自動</option><option value="manual">手動</option></select><span className="table-muted">{service.runAs}</span><button className="row-action" onClick={() => onServiceToggle(server.id, service.id)}><Power size={12} />{service.status === "running" ? "停止" : "開始"}</button></div>) : <EmptyManager text="サービスは見つかりませんでした。" /> }
         <div className="manager-bottom-actions"><span>{environment.services.length} 個のサービス</span><ManagerTransfer kind="services" source={environment.services.length > 0} canImport={canImport} onExport={() => onExport(server.id, "services")} onImport={() => onImport(server.id)} /></div>
       </ManagerFrame>}
 
@@ -1791,7 +1821,7 @@ function ManagerWindow({
 
       {app === "tasks" && <ManagerFrame title="タスク スケジューラ ライブラリ" icon={<ListTodo size={15} />}>
         <div className="manager-toolbar task-columns"><span>タスク / 実行ファイル</span><span>実行時間</span><span>実行ユーザー</span><span>前回の結果</span><span>操作</span></div>
-        {environment.tasks.length ? environment.tasks.map((task) => <div className="manager-row task-columns" key={task.id}><div className="manager-primary"><FolderClock size={14} /><span><strong>{task.name}</strong><small>{task.executable}</small></span></div><span className="table-muted">{task.schedule}</span><span className="table-muted">{task.runAs}</span><span className="service-state running">{taskRuns[task.id] ?? "未実行"}</span><button className="row-action" onClick={() => { onTaskRun(task.id); onNotify(`${task.name} を実行しました`); }}><Play size={12} />実行</button></div>) : <EmptyManager text="このコンピューターにはタスクがありません。" />}
+        {environment.tasks.length ? environment.tasks.map((task) => <div className="manager-row task-columns" key={task.id}><div className="manager-primary"><FolderClock size={14} /><span><strong>{task.name}</strong><small>{task.executable}</small></span></div><span className="table-muted">{task.schedule}</span><span className="table-muted">{task.runAs}</span><span className="service-state running">{taskRuns[task.id] ?? "未実行"}</span><button className="row-action" onClick={() => { onTaskRun(task.id); onNotify(`${task.name} を実行しました`); }}><Play size={12} />試運転</button></div>) : <EmptyManager text="このコンピューターにはタスクがありません。" />}
         <div className="manager-bottom-actions"><span>{environment.tasks.length} 個のタスク</span><ManagerTransfer kind="tasks" source={environment.tasks.length > 0} canImport={canImport} onExport={() => onExport(server.id, "tasks")} onImport={() => onImport(server.id)} /></div>
       </ManagerFrame>}
 

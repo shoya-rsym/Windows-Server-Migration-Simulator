@@ -334,13 +334,15 @@ function calculateProjectScores(
       / securityChecks.reduce((weight, check) => weight + check.weight, 0) * 100)
     : migrationRate;
   const operationsScore =
-    (project.noticeSent ? 25 : 0)
-    + (project.noticeSent && project.noticeLeadDays >= 1 ? 15 : 0)
+    (project.noticeSent ? 20 : 0)
+    + (project.noticeSent && project.noticeLeadDays >= 1 ? 10 : 0)
     + (project.ttlLeadDays >= 3 ? 10 : 0)
     + (wasTtlPreparedBeforeCutover(scenario, events) ? 10 : 0)
     + (downtimeScore ? 15 : 0)
     + (hasRollbackPlan ? 15 : 0)
-    + (project.cutoverDecision !== "pending" ? 10 : 0);
+    + (project.cutoverDecision !== "pending" ? 10 : 0)
+    + (eventNames.has("verify:task-run") ? 5 : 0)
+    + (eventNames.has("verify:service-startup") ? 5 : 0);
 
   return [
     { id: "research", label: "調査品質", score: researchScore },
