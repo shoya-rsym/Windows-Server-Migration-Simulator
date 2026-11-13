@@ -68,4 +68,31 @@ describe("tutorial workflow guidance", () => {
     expect(blockedGoEvents.map((event) => event.name)).not.toContain("tutorial:go-ready");
     expect(changedNoticeEvents.map((event) => event.name)).not.toContain("project:notice-sent");
   });
+
+  it("requires complete investigation notes and all expected architecture dependencies", () => {
+    const initialProject = createInitialProjectWorkspace(scenario.project);
+    const threeNotes = Array.from({ length: 3 }, (_, index) => ({
+      id: `${index}`,
+      title: `調査 ${index}`,
+      detail: `根拠 ${index}`,
+      createdAt: index,
+    }));
+    const completeProject = {
+      ...initialProject,
+      investigationNotes: threeNotes,
+      architectureEdges: scenario.project.dependencies.map(({ id, from, to }) => ({ id, from, to })),
+    };
+    const partialProject = {
+      ...completeProject,
+      investigationNotes: threeNotes.slice(0, 2),
+      architectureEdges: completeProject.architectureEdges.slice(0, -1),
+    };
+    const completeEvents = deriveTutorialEvents([], scenario, completeProject, []);
+    const partialEvents = deriveTutorialEvents([], scenario, partialProject, []);
+
+    expect(completeEvents.map((event) => event.name)).toContain("tutorial:investigation-notes-ready");
+    expect(completeEvents.map((event) => event.name)).toContain("tutorial:architecture-ready");
+    expect(partialEvents.map((event) => event.name)).not.toContain("tutorial:investigation-notes-ready");
+    expect(partialEvents.map((event) => event.name)).not.toContain("tutorial:architecture-ready");
+  });
 });

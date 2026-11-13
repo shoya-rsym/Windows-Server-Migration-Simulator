@@ -3,11 +3,15 @@ import type { Scenario } from "./models";
 
 const tutorialOnlyEvents = new Set([
   "inspect:hostname:source",
+  "inspect:route:application:source",
+  "inspect:route:database:source",
   "verify:post-cutover",
   "project:notice-sent",
   "start:oracle-service",
   "tutorial:project-plan-ready",
   "tutorial:go-ready",
+  "tutorial:investigation-notes-ready",
+  "tutorial:architecture-ready",
 ]);
 
 function isTutorialOnlyEvent(event: string, scenario: Scenario): boolean {

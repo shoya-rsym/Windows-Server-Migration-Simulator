@@ -29,6 +29,31 @@ if (!sourceApplication || !targetApplication || !sourceDatabase || !targetDataba
 }
 
 describe("migration project workflows", () => {
+  it.each([sourceApplication, sourceDatabase, targetApplication, targetDatabase])(
+    "returns host-specific inventory and routes for $hostname",
+    (server) => {
+      const environments = createRuntimeEnvironments(scenario);
+      const environment = environments[server.id];
+      if (!environment) throw new Error(`Runtime environment is missing for ${server.hostname}.`);
+      const dns = initialDnsRuntime(scenario.assets.dns[0]);
+      const output = (command: string) => runCommand(
+        command,
+        server,
+        scenario,
+        environment,
+        environments,
+        dns,
+      ).output.join("\n");
+      const network = server.ipAddress.slice(0, server.ipAddress.lastIndexOf("."));
+
+      expect(output("hostname")).toBe(server.hostname);
+      expect(output("systeminfo")).toContain(server.hostname);
+      expect(output("ipconfig /all")).toContain(server.ipAddress);
+      expect(output("route print")).toContain(`${network}.1`);
+      expect(output("route print")).toContain(server.ipAddress);
+    },
+  );
+
   it("detects and resolves an expert batch incident in the simulated event log", () => {
     const environments = createExpertRuntimeEnvironments(scenario, "batch-task");
     const targetEnvironment = environments[targetApplication.id];

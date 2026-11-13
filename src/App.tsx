@@ -483,6 +483,10 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     if (normalized === "systeminfo" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:os:source");
     if (normalized === "hostname" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:hostname:source");
     if (normalized === "java -version" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:java:source");
+    if (normalized === "route print" && server.stage === "source"
+      && (server.role === "application" || server.role === "database")) {
+      recordAuditEvent(`inspect:route:${server.role}:source`);
+    }
     if ((normalized === "sqlplus" || normalized === "sqlplus / as sysdba" || normalized === "lsnrctl status") && server.role === "database") {
       recordAuditEvent(`inspect:oracle:${server.stage}`);
     }

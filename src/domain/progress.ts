@@ -224,9 +224,19 @@ export function deriveTutorialEvents(
     && project.ttlLeadDays >= 3
     && project.noticeLeadDays >= 1
     && project.rollbackPlan.trim().length >= 20;
+  const completeInvestigationNotes = project.investigationNotes.filter((note) =>
+    note.title.trim() && note.detail.trim(),
+  ).length;
+  const architectureMapped = scenario.project.dependencies.every((expected) =>
+    project.architectureEdges.some((actual) =>
+      normalize(actual.from) === normalize(expected.from) && normalize(actual.to) === normalize(expected.to),
+    ),
+  );
 
   if (cloudSetupReady) derivedEvents.push({ name: "tutorial:cloud-setup-ready", at: 0 });
   if (projectPlanReady) derivedEvents.push({ name: "tutorial:project-plan-ready", at: 0 });
+  if (completeInvestigationNotes >= 3) derivedEvents.push({ name: "tutorial:investigation-notes-ready", at: 0 });
+  if (architectureMapped) derivedEvents.push({ name: "tutorial:architecture-ready", at: 0 });
   if (project.cutoverDecision === "go"
     && readinessItems.length > 0
     && readinessItems.every((item) => item.ready)) {
