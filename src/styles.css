@@ -39,7 +39,13 @@ button:disabled { cursor: not-allowed; }
 .notes-toggle span { display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; color: #71819a; background: #f0f3f7; border-radius: 8px; font-size: 10.0px; }
 .notes-toggle:hover,.notes-toggle.active { background: #f7faff; border-color: #c6d6ec; }
 .header-icon { display: grid; place-items: center; color: #8694a8; background: transparent; border: 0; padding: 5px; }
-.lab-main { width: min(1600px,100%); margin: 0 auto; padding: 25px 28px 18px; }
+.lab-workspace { width: min(1900px,100%); display: grid; grid-template-columns: minmax(0,1fr); align-items: start; margin: 0 auto; }
+.lab-workspace.has-side-panel { grid-template-columns: minmax(0,1fr) minmax(340px,420px); gap: 14px; padding-right: 14px; }
+.lab-main { width: 100%; max-width: 1600px; margin: 0 auto; padding: 25px 28px 18px; }
+.lab-workspace.has-side-panel .lab-main { min-width: 0; max-width: none; margin: 0; }
+.lab-side-panel { position: sticky; top: 12px; z-index: 1; max-height: calc(100vh - 24px); overflow: auto; margin: 12px 0; }
+.lab-side-panel .workbench-panel { margin-top: 0; }
+.lab-side-panel .audit-report { width: 100%; max-height: calc(100vh - 24px); }
 .workspace-title { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; margin-bottom: 15px; }
 .workspace-eyebrow { color: #7695bf; font-size: 10.0px; letter-spacing: 1.1px; font-weight: 800; }
 .workspace-title h1 { margin: 4px 0 0; color: #2b3c54; font-size: 23.8px; font-weight: 700; letter-spacing: -.3px; }
@@ -276,8 +282,15 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
   .service-columns { grid-template-columns: minmax(0,1.25fr) minmax(42px,.5fr) minmax(48px,.6fr) minmax(55px,.7fr) minmax(42px,.45fr); gap: 4px; }
   .task-columns { grid-template-columns: minmax(0,1.3fr) minmax(48px,.65fr) minmax(56px,.75fr) minmax(50px,.6fr) minmax(37px,.4fr); gap: 4px; }
 }
+@media (max-width: 1150px) {
+  .lab-workspace.has-side-panel { grid-template-columns: minmax(0,1fr) minmax(300px,34vw); }
+  .lab-workspace.has-side-panel .session-grid { grid-template-columns: 1fr; }
+}
 @media (max-width: 800px) {
   .session-grid { grid-template-columns: 1fr; }
+  .lab-workspace.has-side-panel { grid-template-columns: minmax(0,1fr); gap: 0; padding-right: 0; }
+  .lab-workspace.has-side-panel .lab-side-panel { position: static; max-height: none; margin: 0 16px 12px; }
+  .lab-side-panel .audit-report { max-height: 80vh; }
 }
 @media (max-width: 620px) {
   .lab-header { min-height: 58px; gap: 9px; padding: 0 10px; }
@@ -285,6 +298,7 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
   .header-request { display: none; }.header-actions { margin-left: auto; gap: 5px; }.connection-indicator { font-size: 0; padding: 7px; }.connection-indicator i { width: 7px; height: 7px; }
   .notes-toggle { font-size: 0; padding: 6px; }.notes-toggle svg { width: 16px; }.notes-toggle span { font-size: 8.8px; }
   .lab-main { padding: 16px 9px 12px; }
+  .lab-workspace.has-side-panel .lab-side-panel { margin: 0 9px 12px; }
   .workspace-title h1 { font-size: 20.0px; }.workspace-status { gap: 0; }.key-hint { display: none; }
   .session-caption { gap: 7px; padding: 8px; }.session-slot { width: 24px; height: 24px; }.server-name strong { font-size: 11.3px; }.server-name span { font-size: 7.5px; }
   .server-picker select { width: 96px; }.server-picker > span { font-size: 7.5px; }

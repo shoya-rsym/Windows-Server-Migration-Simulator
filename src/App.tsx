@@ -178,9 +178,8 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   const [cloudWorkspace, setCloudWorkspace] = useState<CloudWorkspace>(() => createInitialCloudWorkspace());
   const [desktopShortcut, setDesktopShortcut] = useState<DesktopShortcut>("cmd");
   const [desktopServerId, setDesktopServerId] = useState(initialPanes[0]);
-  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [projectDeskOpen, setProjectDeskOpen] = useState(false);
+  const [activeSidePanel, setActiveSidePanel] = useState<"knowledge" | "project" | "hypotheses" | null>(null);
   const [guideFeedback, setGuideFeedback] = useState("");
   const [advisorFeedback, setAdvisorFeedback] = useState("");
   const [advisorLoading, setAdvisorLoading] = useState(false);
@@ -195,7 +194,6 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   const [transfer, setTransfer] = useState<TransferPackage | null>(null);
   const [hypotheses, setHypotheses] = useState<HypothesisNote[]>([]);
   const [hypothesisInput, setHypothesisInput] = useState("");
-  const [notesOpen, setNotesOpen] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [taskRuns, setTaskRuns] = useState<Record<string, string>>({});
   const [completedObjectives, setCompletedObjectives] = useState<string[]>([]);
@@ -298,11 +296,9 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     setEntryId(0);
     setGuideFeedback("");
     setAdvisorFeedback("");
-    setKnowledgeOpen(false);
-    setHypothesisInput("");
+    setActiveSidePanel(null);
     setStartedAt(Date.now());
     setReportOpen(false);
-    setProjectDeskOpen(false);
     setSessionStarted(true);
     setScreen("lab");
   };
@@ -347,7 +343,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     setEntryId(storedSave.entryId);
     setSessionStarted(true);
     setReportOpen(false);
-    setProjectDeskOpen(false);
+    setActiveSidePanel(null);
     setScreen("lab");
   };
 
@@ -1028,13 +1024,13 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         </div>
         <div className="header-actions">
           <div className={`connection-indicator ${hasOpenIssues ? "attention" : ""}`}><i />{hasOpenIssues ? "要確認" : "接続中"}</div>
-          <button className={`notes-toggle ${knowledgeOpen ? "active" : ""}`} onClick={() => setKnowledgeOpen((open) => !open)}>
+          <button className={`notes-toggle ${activeSidePanel === "knowledge" ? "active" : ""}`} onClick={() => setActiveSidePanel((panel) => panel === "knowledge" ? null : "knowledge")}>
             <BookOpen size={15} /> 知識ノート <span>{knowledgeRecords.length}</span>
           </button>
-          <button className={`notes-toggle ${projectDeskOpen ? "active" : ""}`} onClick={() => setProjectDeskOpen(true)}>
+          <button className={`notes-toggle ${activeSidePanel === "project" ? "active" : ""}`} onClick={() => setActiveSidePanel((panel) => panel === "project" ? null : "project")}>
             <ClipboardList size={15} /> 案件デスク
           </button>
-          <button className={`notes-toggle ${notesOpen ? "active" : ""}`} onClick={() => setNotesOpen((open) => !open)}>
+          <button className={`notes-toggle ${activeSidePanel === "hypotheses" ? "active" : ""}`} onClick={() => setActiveSidePanel((panel) => panel === "hypotheses" ? null : "hypotheses")}>
             <Lightbulb size={15} /> 仮説メモ <span>{hypotheses.length}</span>
           </button>
           <button className="header-icon" onClick={() => setScreen("desktop")} title="Windowsデスクトップへ"><Monitor size={16} /></button>
@@ -1042,6 +1038,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         </div>
       </header>
 
+      <div className={`lab-workspace ${activeSidePanel ? "has-side-panel" : ""}`}>
       <main className="lab-main">
         <div className="workspace-title">
           <div><span className="workspace-eyebrow">REMOTE CONSOLE</span><h1>サーバーセッション</h1></div>
@@ -1211,41 +1208,38 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           <span className="guidance-hint">TIP <ArrowDownToLine size={13} /></span>
         </section>
 
-        {knowledgeOpen && (
-          <section className="knowledge-panel">
-            <div className="hypothesis-heading"><div className="hypothesis-icon"><BookOpen size={16} /></div><div><h2>知識ノート</h2><p>実行した調査コマンドから、確認する理由を記録します。</p></div><button className="close-notes" onClick={() => setKnowledgeOpen(false)} aria-label="知識ノートを閉じる"><X size={16} /></button></div>
-            {knowledgeRecords.length === 0 ? <p className="empty-notes">調査結果はまだありません。systeminfo や java -version を実行すると、確認目的が記録されます。</p> : <div className="knowledge-list">{knowledgeRecords.map((record) => <article className="knowledge-item" key={`${record.id}:${record.serverId}`}><strong>{record.title}</strong><small>{record.serverId}</small><p>{record.explanation}</p></article>)}</div>}
-          </section>
-        )}
-
-        {notesOpen && (
-          <section className="hypothesis-panel">
-            <div className="hypothesis-heading"><div className="hypothesis-icon"><Lightbulb size={17} /></div><div><h2>調査メモ</h2><p>気づいた相違点や、障害の原因についての仮説を記録します。</p></div><button className="close-notes" onClick={() => setNotesOpen(false)} aria-label="メモを閉じる"><X size={16} /></button></div>
-            <form className="hypothesis-form" onSubmit={addHypothesis}><input value={hypothesisInput} onChange={(event) => setHypothesisInput(event.target.value)} placeholder="例: 新サーバーのJDBC接続先は旧DBのままではないか？" /><button type="submit" disabled={!hypothesisInput.trim()}>仮説を記録</button></form>
-            {hypotheses.length === 0 ? <p className="empty-notes">まだメモはありません。調査で気づいたことを書き留めてください。</p> : <div className="hypothesis-list">{hypotheses.map((note) => <div className="hypothesis-item" key={note.id}><span className={`hypothesis-state ${note.status}`}>{note.status === "open" ? "未検証" : note.status === "confirmed" ? "確認" : "棄却"}</span><p>{note.text}</p><div className="hypothesis-actions"><button onClick={() => updateHypothesis(note.id, "confirmed")}>確認できた</button><button onClick={() => updateHypothesis(note.id, "rejected")}>仮説を棄却</button></div></div>)}</div>}
-          </section>
-        )}
-
         <div className="completion-bar"><span><Shield size={13} />操作はシミュレーション内だけで実行され、自動保存されます。</span><button className="completion-button" onClick={() => setReportOpen(true)}><CheckCircle2 size={15} />作業完了 / 監査レポート</button></div>
         {storageError && <p className="storage-warning" role="status">セーブエラー: {storageError}</p>}
         <footer className="lab-footer"><span>WINDOWS SERVER LAB <i /> {scenario.title}</span><button onClick={() => setScreen("desktop")}>Windowsデスクトップ</button></footer>
       </main>
+      {activeSidePanel && <aside className="lab-side-panel" aria-label="案件ツール">
+        {activeSidePanel === "project" && <ProjectDeskPanel
+          scenario={scenario}
+          project={projectWorkspace}
+          dnsAddress={dns.address}
+          cachedDnsAddress={dns.cachedAddress}
+          sourceAddress={sourceApplication?.ipAddress ?? ""}
+          targetAddress={targetApplication?.ipAddress ?? ""}
+          hasOpenIssues={hasOpenIssues}
+          readinessItems={cutoverReadiness}
+          onChange={setProjectWorkspace}
+          onSendNotice={sendUserNotice}
+          onDecision={recordCutoverDecision}
+          onRollback={rollbackCutover}
+          onClose={() => setActiveSidePanel(null)}
+        />}
+        {activeSidePanel === "knowledge" && <section className="knowledge-panel workbench-panel">
+          <div className="hypothesis-heading"><div className="hypothesis-icon"><BookOpen size={16} /></div><div><h2>知識ノート</h2><p>実行した調査コマンドから、確認する理由を記録します。</p></div><button className="close-notes" onClick={() => setActiveSidePanel(null)} aria-label="知識ノートを閉じる"><X size={16} /></button></div>
+          {knowledgeRecords.length === 0 ? <p className="empty-notes">調査結果はまだありません。systeminfo や java -version を実行すると、確認目的が記録されます。</p> : <div className="knowledge-list">{knowledgeRecords.map((record) => <article className="knowledge-item" key={`${record.id}:${record.serverId}`}><strong>{record.title}</strong><small>{record.serverId}</small><p>{record.explanation}</p></article>)}</div>}
+        </section>}
+        {activeSidePanel === "hypotheses" && <section className="hypothesis-panel workbench-panel">
+          <div className="hypothesis-heading"><div className="hypothesis-icon"><Lightbulb size={17} /></div><div><h2>調査メモ</h2><p>気づいた相違点や、障害の原因についての仮説を記録します。</p></div><button className="close-notes" onClick={() => setActiveSidePanel(null)} aria-label="メモを閉じる"><X size={16} /></button></div>
+          <form className="hypothesis-form" onSubmit={addHypothesis}><input value={hypothesisInput} onChange={(event) => setHypothesisInput(event.target.value)} placeholder="例: 新サーバーのJDBC接続先は旧DBのままではないか？" /><button type="submit" disabled={!hypothesisInput.trim()}>仮説を記録</button></form>
+          {hypotheses.length === 0 ? <p className="empty-notes">まだメモはありません。調査で気づいたことを書き留めてください。</p> : <div className="hypothesis-list">{hypotheses.map((note) => <div className="hypothesis-item" key={note.id}><span className={`hypothesis-state ${note.status}`}>{note.status === "open" ? "未検証" : note.status === "confirmed" ? "確認" : "棄却"}</span><p>{note.text}</p><div className="hypothesis-actions"><button onClick={() => updateHypothesis(note.id, "confirmed")}>確認できた</button><button onClick={() => updateHypothesis(note.id, "rejected")}>仮説を棄却</button></div></div>)}</div>}
+        </section>}
+      </aside>}
+      </div>
       {notice && <div className="notice-toast"><Check size={15} />{notice}<button onClick={() => setNotice("")} aria-label="通知を閉じる"><X size={14} /></button></div>}
-      {projectDeskOpen && <ProjectDeskModal
-        scenario={scenario}
-        project={projectWorkspace}
-        dnsAddress={dns.address}
-        cachedDnsAddress={dns.cachedAddress}
-        sourceAddress={sourceApplication?.ipAddress ?? ""}
-        targetAddress={targetApplication?.ipAddress ?? ""}
-        hasOpenIssues={hasOpenIssues}
-        readinessItems={cutoverReadiness}
-        onChange={setProjectWorkspace}
-        onSendNotice={sendUserNotice}
-        onDecision={recordCutoverDecision}
-        onRollback={rollbackCutover}
-        onClose={() => setProjectDeskOpen(false)}
-      />}
       {reportOpen && <AuditReportModal report={auditReport} onClose={() => setReportOpen(false)} onRestart={() => startFreshSession(true)} />}
     </div>
   );
@@ -1379,7 +1373,7 @@ function DesktopHome({
   );
 }
 
-function ProjectDeskModal({
+function ProjectDeskPanel({
   scenario,
   project,
   dnsAddress,
@@ -1450,8 +1444,7 @@ function ProjectDeskModal({
   ];
 
   return (
-    <div className="report-backdrop" role="presentation">
-      <section className="audit-report project-desk" role="dialog" aria-modal="true" aria-labelledby="project-desk-title">
+    <section className="audit-report project-desk workbench-panel" role="region" aria-labelledby="project-desk-title">
         <header className="report-header">
           <div><small>PROJECT CONTROL DESK</small><h2 id="project-desk-title">案件デスク</h2></div>
           <button onClick={onClose} aria-label="案件デスクを閉じる"><X size={17} /></button>
@@ -1583,8 +1576,7 @@ function ProjectDeskModal({
         </div>}
 
         <footer className="report-actions"><span>変更はこのブラウザーに自動保存されます。</span><button onClick={onClose}>案件デスクを閉じる</button></footer>
-      </section>
-    </div>
+    </section>
   );
 }
 
