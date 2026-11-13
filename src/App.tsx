@@ -21,6 +21,7 @@ import {
   Lightbulb,
   ListTodo,
   LockKeyhole,
+  MessageCircle,
   Monitor,
   Power,
   Network,
@@ -33,6 +34,7 @@ import {
   X,
 } from "lucide-react";
 import { AwsConsole } from "./components/AwsConsole";
+import { createLocalAdvisor } from "./domain/advisor";
 import {
   createRuntimeEnvironments,
   createExpertRuntimeEnvironments,
@@ -52,6 +54,7 @@ import type {
   DatabaseMigrationStrategy,
   DeploymentProvider,
   DifficultyMode,
+  Advisor,
   HypothesisNote,
   ManagerApp,
   ProjectWorkspace,
@@ -79,6 +82,7 @@ import {
 const scenarioModules = import.meta.glob("./data/scenarios/*.json", { eager: true, import: "default" });
 const scenarios = Object.values(scenarioModules).map(loadScenario);
 if (scenarios.length === 0) throw new Error("シナリオJSONが見つかりません。");
+const defaultAdvisor = createLocalAdvisor();
 type DesktopShortcut = "cmd" | "powershell" | "explorer" | ManagerApp;
 type ShellMode = "cmd" | "powershell";
 
@@ -130,16 +134,17 @@ function createLegacyAwsWorkspace(scenario: Scenario): CloudWorkspace {
   };
 }
 
-function App() {
+function App({ advisor = defaultAdvisor }: { advisor?: Advisor } = {}) {
   const [selectedScenarioId, setSelectedScenarioId] = useState(scenarios[0].id);
   const scenario = scenarios.find((item) => item.id === selectedScenarioId);
   if (!scenario) throw new Error(`Unknown scenario: ${selectedScenarioId}`);
-  return <SimulationApp key={scenario.id} scenario={scenario} scenarios={scenarios} onScenarioChange={setSelectedScenarioId} />;
+  return <SimulationApp key={scenario.id} scenario={scenario} scenarios={scenarios} advisor={advisor} onScenarioChange={setSelectedScenarioId} />;
 }
 
-function SimulationApp({ scenario, scenarios, onScenarioChange }: {
+function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   scenario: Scenario;
   scenarios: Scenario[];
+  advisor: Advisor;
   onScenarioChange: (scenarioId: string) => void;
 }) {
   const initialDns = initialDnsRuntime(scenario.assets.dns[0]);
@@ -167,6 +172,8 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
   const [reportOpen, setReportOpen] = useState(false);
   const [projectDeskOpen, setProjectDeskOpen] = useState(false);
   const [guideFeedback, setGuideFeedback] = useState("");
+  const [advisorFeedback, setAdvisorFeedback] = useState("");
+  const [advisorLoading, setAdvisorLoading] = useState(false);
   const [paneServerIds, setPaneServerIds] = useState<[string, string]>(initialPanes);
   const [environments, setEnvironments] = useState<RuntimeEnvironments>(() => createRuntimeEnvironments(scenario));
   const [dns, setDns] = useState<DnsRuntime>(initialDns);
@@ -280,6 +287,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setProjectWorkspace(createInitialProjectWorkspace(scenario.project));
     setEntryId(0);
     setGuideFeedback("");
+    setAdvisorFeedback("");
     setKnowledgeOpen(false);
     setHypothesisInput("");
     setStartedAt(Date.now());
@@ -849,6 +857,27 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     setHypotheses((previous) => previous.map((note) => note.id === id ? { ...note, status } : note));
   };
 
+  const requestAdvisorAdvice = async () => {
+    setAdvisorLoading(true);
+    setAdvisorFeedback("");
+    try {
+      const server = scenario.assets.servers.find((item) => item.id === paneServerIds[1]);
+      if (!server) throw new Error(`Unknown advisor server session: ${paneServerIds[1]}`);
+      const advice = await advisor.getAdvice({
+        scenario,
+        server,
+        mode,
+        recentCommands: history[server.id] ?? [],
+        hypotheses,
+      });
+      setAdvisorFeedback(advice);
+    } catch (error) {
+      setAdvisorFeedback(`助言を取得できませんでした: ${error instanceof Error ? error.message : "原因不明のエラー"}`);
+    } finally {
+      setAdvisorLoading(false);
+    }
+  };
+
   const changePaneServer = (index: 0 | 1, serverId: string) => {
     setPaneServerIds((previous) => {
       const updated: [string, string] = [...previous];
@@ -876,7 +905,7 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
     : mode === "beginner"
       ? activeObjective?.beginnerInstruction || "調査項目を確認しました。移行作業を続けてください。"
       : mode === "intermediate"
-        ? "Windows Server 2016 から 2019 へ更改してください。構成図はありません。現行環境を調査して計画してください。"
+        ? "Windows Server 2016 から 2019 へ更改してください。OS・実行環境・DB・依存関係を調査し、構成図と移行計画にまとめてください。確認順やコマンド例は表示されません。"
         : mode === "advanced"
           ? "切替後、ログインできません。"
           : scenario.incidents.find((incident) => incident.id === expertIncidentId)?.description ?? "業務システムで障害が発生しています。ログと構成から原因を特定してください。";
@@ -991,6 +1020,12 @@ function SimulationApp({ scenario, scenarios, onScenarioChange }: {
             {mode === "tutorial" && (tutorialProgress.previousStep?.explanation || guideFeedback)
               && <span className="supervisor-explanation">解説: {tutorialProgress.previousStep?.explanation || guideFeedback}</span>}
             {mode === "beginner" && guideFeedback && <span className="supervisor-explanation">解説: {guideFeedback}</span>}
+            {mode !== "tutorial" && mode !== "beginner" && <>
+              <button className="advisor-request-button" onClick={requestAdvisorAdvice} disabled={advisorLoading}>
+                <MessageCircle size={13} />{advisorLoading ? "助言を準備中..." : "ローカル助言を依頼"}
+              </button>
+              {advisorFeedback && <span className="advisor-feedback" role="status">{advisorFeedback}</span>}
+            </>}
           </div>
           {mode === "tutorial" && <span className="supervisor-progress">{tutorialProgress.completedCount}/{scenario.tutorialSteps.length} 手順</span>}
         </section>

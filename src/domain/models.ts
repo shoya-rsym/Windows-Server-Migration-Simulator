@@ -252,6 +252,7 @@ export interface HypothesisNote {
 export interface AdvisorContext {
   scenario: Scenario;
   server: Server;
+  mode: DifficultyMode;
   recentCommands: ConsoleEntry[];
   hypotheses: HypothesisNote[];
 }
