@@ -84,7 +84,7 @@ DB移行コマンドは教育用の疑似操作です。各方式はスキーマ
 - チュートリアルの手順・完了イベント・解説
 - 監査チェック、未実施操作の説明、修正方法、影響、重み、推奨作業順序
 
-サーバーには`stage`（`source` / `target` / `infrastructure`）を指定します。学習目標の`commands`、監査項目の`requiredEvents`と操作イベント名は、画面のヒントやレポートと連動します。追加シナリオの各参照は`src/domain/scenario.ts`の検証スキーマを満たす必要があります。
+サーバーには`stage`（`source` / `target` / `infrastructure`）を指定します。学習目標の`commands`、監査項目の`requiredEvents`と操作イベント名は、画面のヒントやレポートと連動します。追加シナリオはIDの一意性、VMとホストの双方向参照、DB配置先ロール、DNSのIP参照、障害ごとの再現資産・修復操作、監査項目を網羅する推奨順序なども読み込み時に検証されます。検証は`npm test`でも各不正ケースを含めて確認できます。
 
 `project.dependencies`は`id`、`from`、`to`、`reason`を持ち、`from`と`to`は`project.components`に定義します。プレイヤーが案件デスクで記録した依存関係と比較し、設計品質を採点します。
 
