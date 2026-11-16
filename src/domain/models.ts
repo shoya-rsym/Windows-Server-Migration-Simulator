@@ -208,10 +208,7 @@ export interface StoryFailureBranch {
 }
 
 export interface StoryStep {
-  id: string;
-  title: string;
-  targetElement: string;
-  explanation: string;
+  tutorialStepId: string;
   aiComment: string;
   autoActions: StoryAction[];
   quiz?: {

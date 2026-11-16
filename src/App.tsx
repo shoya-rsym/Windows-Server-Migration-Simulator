@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import {
   Activity,
   AlertCircle,
@@ -67,6 +67,7 @@ import type {
   Scenario,
   Server,
   Task,
+  TutorialStep,
   TransferPackage,
 } from "./domain/models";
 import { StoryModePlayer } from "./components/StoryModePlayer";
@@ -93,6 +94,7 @@ const defaultAdvisor = createLocalAdvisor();
 type DesktopShortcut = "cmd" | "powershell" | "explorer" | ManagerApp;
 type ShellMode = "cmd" | "powershell";
 type StartExperience = DifficultyMode | "story";
+type ProjectDeskTab = "overview" | "investigation" | "documents" | "mail" | "teams" | "meetings" | "effort" | "plan" | "cutover";
 
 function readSimulationSave(saveKey: string): { save: SimulationSave | null; error: string | null } {
   try {
@@ -112,6 +114,68 @@ function readSimulationSave(saveKey: string): { save: SimulationSave | null; err
 
 function isManagerShortcut(shortcut: DesktopShortcut): shortcut is ManagerApp {
   return shortcut !== "cmd" && shortcut !== "powershell";
+}
+
+function getObservationServers(scenario: Scenario, stepId: string, fallback: [string, string]): [string, string] {
+  const server = (role: Server["role"], stage: Server["stage"]) =>
+    scenario.assets.servers.find((item) => item.role === role && item.stage === stage)?.id;
+  const sourceApplication = server("application", "source") ?? fallback[0];
+  const targetApplication = server("application", "target") ?? fallback[1];
+  const sourceDatabase = server("database", "source");
+  const targetDatabase = server("database", "target");
+  const dnsServer = server("dns", "infrastructure") ?? server("dns", "source");
+
+  if (stepId === "inspect-network-routes" && sourceDatabase) return [sourceApplication, sourceDatabase];
+  if (["inspect-oracle-source"].includes(stepId) && sourceDatabase) {
+    return [sourceDatabase, targetDatabase ?? sourceDatabase];
+  }
+  if (["install-target-oracle", "start-and-inspect-target-oracle", "migrate-database"].includes(stepId) && targetDatabase) {
+    return [sourceDatabase ?? targetDatabase, targetDatabase];
+  }
+  if (["reduce-dns-ttl", "cutover-dns"].includes(stepId) && dnsServer) return [dnsServer, targetApplication];
+  return [sourceApplication, targetApplication];
+}
+
+function getObservationTarget(stepId: string): string {
+  if (["record-investigation-notes", "map-architecture", "prepare-project-plan", "send-user-notice", "approve-cutover"].includes(stepId)) {
+    return "project-desk";
+  }
+  if (stepId === "inspect-network-routes" || stepId === "migrate-database") return "server-grid";
+  if (["inspect-oracle-source"].includes(stepId)) return "server-source-database";
+  if (["install-target-oracle", "start-and-inspect-target-oracle"].includes(stepId)) return "server-target-database";
+  if (["reduce-dns-ttl", "cutover-dns"].includes(stepId)) return "server-infrastructure-dns";
+  if ([
+    "install-target-ap",
+    "migrate-jdbc",
+    "migrate-services",
+    "migrate-resin-config",
+    "migrate-tasks",
+    "migrate-certificates",
+    "start-resin",
+    "verify-operational-readiness",
+    "verify-connectivity",
+    "verify-post-cutover",
+    "investigate-events",
+  ].includes(stepId)) return "server-target-application";
+  return "server-source-application";
+}
+
+function getObservationProjectTab(stepId: string): ProjectDeskTab {
+  if (["record-investigation-notes", "map-architecture"].includes(stepId)) return "investigation";
+  if (["prepare-project-plan", "send-user-notice"].includes(stepId)) return "plan";
+  return "cutover";
+}
+
+function getObservationApp(stepId: string): ManagerApp | null {
+  if (stepId.startsWith("install-target-")) return "setup";
+  if (["inspect-oracle-source", "start-and-inspect-target-oracle", "migrate-database"].includes(stepId)) return "database";
+  if (stepId === "migrate-resin-config") return "resinConfig";
+  if (["migrate-services", "start-resin", "verify-operational-readiness"].includes(stepId)) return "services";
+  if (stepId === "migrate-tasks") return "tasks";
+  if (stepId === "migrate-certificates") return "certificates";
+  if (["reduce-dns-ttl", "cutover-dns"].includes(stepId)) return "dns";
+  if (stepId === "investigate-events") return "events";
+  return null;
 }
 
 function jdbcDraftKey(serverId: string): string {
@@ -177,10 +241,13 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   const [storedRead] = useState(() => readSimulationSave(saveKey));
   const [storedSave, setStoredSave] = useState<SimulationSave | null>(storedRead.save);
   const [storageError, setStorageError] = useState(storedRead.error);
-  const [screen, setScreen] = useState<"desktop" | "lab" | "story">("desktop");
+  const [screen, setScreen] = useState<"desktop" | "lab">("desktop");
   const [sessionStarted, setSessionStarted] = useState(false);
   const [mode, setMode] = useState<DifficultyMode>("tutorial");
   const [startExperience, setStartExperience] = useState<StartExperience>("tutorial");
+  const [storyModeActive, setStoryModeActive] = useState(false);
+  const [observationTargetId, setObservationTargetId] = useState("server-source-application");
+  const [observationProjectTab, setObservationProjectTab] = useState<ProjectDeskTab | null>(null);
   const [provider, setProvider] = useState<DeploymentProvider>("onprem");
   const [cloudWorkspace, setCloudWorkspace] = useState<CloudWorkspace>(() => createInitialCloudWorkspace());
   const [desktopShortcut, setDesktopShortcut] = useState<DesktopShortcut>("cmd");
@@ -302,30 +369,36 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       : [...previous, { name, at: Date.now() }]);
   };
 
-  const startFreshSession = (confirmReset = false) => {
-    if (confirmReset && !window.confirm("現在の進行状況を破棄して、最初からやり直しますか？")) return;
-    try {
-      window.localStorage.removeItem(saveKey);
-      setStorageError(null);
-      setStoredSave(null);
-    } catch (error) {
-      setStorageError(error instanceof Error ? error.message : "保存データを削除できませんでした。");
+  const startFreshSession = (confirmReset = false, observation = false) => {
+    if (confirmReset && !observation && !window.confirm("現在の進行状況を破棄して、最初からやり直しますか？")) return;
+    if (!observation) {
+      try {
+        window.localStorage.removeItem(saveKey);
+        setStorageError(null);
+        setStoredSave(null);
+      } catch (error) {
+        setStorageError(error instanceof Error ? error.message : "保存データを削除できませんでした。");
+      }
     }
-    const availableServers = getAvailableServers(scenario, provider, cloudWorkspace);
+    const sessionMode: DifficultyMode = observation ? "tutorial" : mode;
+    const sessionProvider: DeploymentProvider = observation ? "onprem" : provider;
+    const availableServers = observation
+      ? scenario.assets.servers
+      : getAvailableServers(scenario, sessionProvider, cloudWorkspace);
     const serverId = availableServers.some((server) => server.id === desktopServerId)
       ? desktopServerId
       : availableServers[0]?.id ?? initialPanes[0];
     const secondServerId = availableServers.some((server) => server.id === initialPanes[1])
       ? initialPanes[1]
       : serverId;
-    const isManager = isManagerShortcut(desktopShortcut);
+    const isManager = !observation && isManagerShortcut(desktopShortcut);
     setPaneServerIds([serverId, secondServerId]);
-    const expertIncident = mode === "expert" ? chooseExpertIncident(scenario) : null;
+    const expertIncident = sessionMode === "expert" ? chooseExpertIncident(scenario) : null;
     setExpertIncidentId(expertIncident?.id ?? null);
     setEnvironments(expertIncident
       ? createExpertRuntimeEnvironments(scenario, expertIncident.id)
       : createRuntimeEnvironments(scenario));
-    const startupDns = (mode === "advanced" || mode === "expert") && targetApplication
+    const startupDns = (sessionMode === "advanced" || sessionMode === "expert") && targetApplication
       ? { ...initialDns, address: targetApplication.ipAddress, cachedAddress: targetApplication.ipAddress }
       : initialDns;
     setDns(startupDns);
@@ -349,7 +422,12 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     setActiveSidePanel(null);
     setStartedAt(Date.now());
     setReportOpen(false);
-    setSessionStarted(true);
+    setMode(sessionMode);
+    setProvider(sessionProvider);
+    setSessionStarted(!observation);
+    setStoryModeActive(observation);
+    setObservationTargetId("server-source-application");
+    setObservationProjectTab(null);
     setScreen("lab");
   };
 
@@ -396,6 +474,25 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     setActiveSidePanel(null);
     setScreen("lab");
   };
+
+  const handleObservationStepChange = useCallback((step: TutorialStep) => {
+    const projectStepIds = ["record-investigation-notes", "map-architecture", "prepare-project-plan", "send-user-notice", "approve-cutover"];
+    const projectStep = projectStepIds.includes(step.id);
+    const paneIds = getObservationServers(scenario, step.id, initialPanes);
+    const app = getObservationApp(step.id);
+    setObservationTargetId(getObservationTarget(step.id));
+    setObservationProjectTab(projectStep ? getObservationProjectTab(step.id) : null);
+    setActiveSidePanel(projectStep ? "project" : null);
+    setPaneServerIds(paneIds);
+    setActiveApps(Object.fromEntries(paneIds.map((serverId) => {
+      const server = scenario.assets.servers.find((item) => item.id === serverId);
+      const isCompatible = app && server
+        && (app === "dns" ? server.role === "dns"
+          : app === "database" ? server.role === "database"
+            : server.role === "application" && (app !== "setup" || server.stage === "target"));
+      return [serverId, isCompatible ? app : null];
+    })));
+  }, [initialPanes, scenario]);
 
   const notify = (message: string) => {
     setNotice(message);
@@ -1028,22 +1125,6 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           ? "切替後、ログインできません。"
           : scenario.incidents.find((incident) => incident.id === expertIncidentId)?.description ?? "業務システムで障害が発生しています。ログと構成から原因を特定してください。";
 
-  if (screen === "story") {
-    const story = scenario.storyMode;
-    if (!story?.enabled) throw new Error(`Scenario ${scenario.id} does not provide an enabled story mode.`);
-    return (
-      <StoryModePlayer
-        story={story}
-        onExit={() => setScreen("desktop")}
-        onStartTutorial={() => {
-          setMode("tutorial");
-          setStartExperience("tutorial");
-          setScreen("desktop");
-        }}
-      />
-    );
-  }
-
   if (screen === "desktop") {
     return (
       <DesktopHome
@@ -1081,7 +1162,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         onServerChange={setDesktopServerId}
         onStart={() => {
           if (startExperience === "story") {
-            if (scenario.storyMode?.enabled) setScreen("story");
+            if (scenario.storyMode?.enabled) startFreshSession(false, true);
             return;
           }
           if (cloudSetupReady) startFreshSession();
@@ -1094,12 +1175,12 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
 
   return (
     <div className="lab-shell">
-      <header className="lab-header">
+      <header className="lab-header" data-observation-target="lab-header">
         <div className="lab-brand">
           <div className="lab-brand-icon"><Monitor size={19} /></div>
           <div><strong>PROJECT<span>LAB</span></strong><small>SYSTEM ENGINEER PROJECT SIMULATOR</small></div>
         </div>
-        <div className="header-request">
+        <div className="header-request" data-observation-target="header-request">
           <span className="request-mark"><Activity size={14} /></span>
           <span><small>{mode === "tutorial" ? "AI上司 / チュートリアル" : mode === "expert" ? "障害報告" : "作業依頼"}</small><strong>{mode === "expert" ? "発生した障害を調査し、原因を特定してください。" : mode === "advanced" ? "切替後、ログインできません" : "新環境へ移行し、切替後の稼働を確認してください"}</strong></span>
         </div>
@@ -1130,7 +1211,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           <div className="workspace-status"><span><i />{providerLabel(provider)} · {modeLabel(mode)}</span><span className="key-hint"><kbd>Enter</kbd> コマンドを実行</span></div>
         </div>
 
-        <section className={`supervisor-card mode-${mode}`}>
+        <section className={`supervisor-card mode-${mode}`} data-observation-target="tutorial-guidance">
           <div className="supervisor-avatar">{mode === "tutorial" ? "AI" : <Activity size={17} />}</div>
           <div className="supervisor-copy"><small>{mode === "tutorial" ? "AI上司 / 調査ガイド" : `${modeLabel(mode)} / 作業指示`}</small><strong>{modePrompt}</strong>
             {mode === "tutorial" && (tutorialProgress.previousStep?.explanation || guideFeedback)
@@ -1146,7 +1227,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           {mode === "tutorial" && <span className="supervisor-progress">{tutorialProgress.completedCount}/{tutorialSteps.length} 手順</span>}
         </section>
 
-        <div className="session-grid">
+        <div className="session-grid" data-observation-target="server-grid">
           {paneServerIds.map((serverId, index) => {
             const server = scenario.assets.servers.find((item) => item.id === serverId);
             const environment = environments[serverId];
@@ -1174,6 +1255,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
                   ? drafts[resinConfigDraftKey(serverId)] ?? environment.configurationFiles[0]?.content ?? ""
                   : drafts[jdbcDraftKey(serverId)] ?? environment.jdbcProperties ?? ""}
                 taskRuns={taskRuns}
+                observationTargetId={`server-${server.stage}-${server.role}`}
                 onServerChange={(id) => changePaneServer(index as 0 | 1, id)}
                 onInputChange={(value) => setInputs((previous) => ({ ...previous, [serverId]: value }))}
                 onExecute={(command) => execute(serverId, command)}
@@ -1313,7 +1395,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           <span className="guidance-hint">TIP <ArrowDownToLine size={13} /></span>
         </section>
 
-        <div className="completion-bar"><span><Shield size={13} />操作はシミュレーション内だけで実行され、自動保存されます。</span><button className="completion-button" onClick={() => setReportOpen(true)}><CheckCircle2 size={15} />作業完了 / 監査レポート</button></div>
+        <div className="completion-bar"><span><Shield size={13} />{storyModeActive ? "観察モードは読み取り専用です。進行状況は保存されません。" : "操作はシミュレーション内だけで実行され、自動保存されます。"}</span><button className="completion-button" onClick={() => setReportOpen(true)} disabled={storyModeActive}><CheckCircle2 size={15} />作業完了 / 監査レポート</button></div>
         {storageError && <p className="storage-warning" role="status">セーブエラー: {storageError}</p>}
         <footer className="lab-footer"><span>WINDOWS SERVER LAB <i /> {scenario.title}</span><button onClick={() => setScreen("desktop")}>Windowsデスクトップ</button></footer>
       </main>
@@ -1338,6 +1420,8 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         {activeSidePanel === "project" && <ProjectDeskPanel
           scenario={scenario}
           project={projectWorkspace}
+          observationTab={storyModeActive ? observationProjectTab : null}
+          readOnlyObservation={storyModeActive}
           effortEstimate={auditReport.effortEstimate}
           dnsAddress={dns.address}
           cachedDnsAddress={dns.cachedAddress}
@@ -1362,6 +1446,26 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         </section>}
       </aside>}
       </div>
+      {storyModeActive && scenario.storyMode?.enabled && <StoryModePlayer
+        story={scenario.storyMode}
+        tutorialSteps={scenario.tutorialSteps}
+        focusTargetId={observationTargetId}
+        onStepChange={handleObservationStepChange}
+        onExit={() => {
+          setStoryModeActive(false);
+          setSessionStarted(false);
+          setActiveSidePanel(null);
+          setScreen("desktop");
+        }}
+        onStartTutorial={() => {
+          setStoryModeActive(false);
+          setSessionStarted(false);
+          setMode("tutorial");
+          setStartExperience("tutorial");
+          setActiveSidePanel(null);
+          setScreen("desktop");
+        }}
+      />}
       {notice && <div className="notice-toast"><Check size={15} />{notice}<button onClick={() => setNotice("")} aria-label="通知を閉じる"><X size={14} /></button></div>}
       {reportOpen && <AuditReportModal report={auditReport} onClose={() => setReportOpen(false)} onRestart={() => startFreshSession(true)} />}
     </div>
@@ -1501,6 +1605,8 @@ function DesktopHome({
 function ProjectDeskPanel({
   scenario,
   project,
+  observationTab,
+  readOnlyObservation,
   effortEstimate,
   dnsAddress,
   cachedDnsAddress,
@@ -1516,6 +1622,8 @@ function ProjectDeskPanel({
 }: {
   scenario: Scenario;
   project: ProjectWorkspace;
+  observationTab: ProjectDeskTab | null;
+  readOnlyObservation: boolean;
   effortEstimate: ReturnType<typeof calculateAuditReport>["effortEstimate"];
   dnsAddress: string;
   cachedDnsAddress: string;
@@ -1530,6 +1638,9 @@ function ProjectDeskPanel({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "teams" | "meetings" | "effort" | "plan" | "cutover">("overview");
+  useEffect(() => {
+    if (observationTab) setTab(observationTab);
+  }, [observationTab]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDetail, setNoteDetail] = useState("");
   const [edgeFrom, setEdgeFrom] = useState("");
@@ -1687,7 +1798,7 @@ function ProjectDeskPanel({
   ];
 
   return (
-    <section className="audit-report project-desk workbench-panel" role="region" aria-labelledby="project-desk-title">
+    <section className="audit-report project-desk workbench-panel" data-observation-target="project-desk" role="region" aria-labelledby="project-desk-title">
         <header className="report-header">
           <div><small>PROJECT CONTROL DESK</small><h2 id="project-desk-title">案件デスク</h2></div>
           <button onClick={onClose} aria-label="案件デスクを閉じる"><X size={17} /></button>
@@ -2060,7 +2171,7 @@ function ProjectDeskPanel({
           </div>
         </div>}
 
-        <footer className="report-actions"><span>変更はこのブラウザーに自動保存されます。</span><button onClick={onClose}>案件デスクを閉じる</button></footer>
+        <footer className="report-actions"><span>{readOnlyObservation ? "観察モードは読み取り専用です。セーブデータを変更しません。" : "変更はこのブラウザーに自動保存されます。"}</span><button onClick={onClose}>案件デスクを閉じる</button></footer>
     </section>
   );
 }
@@ -2142,6 +2253,7 @@ function AuditReportModal({
 function ServerSession({
   slot,
   server,
+  observationTargetId,
   servers,
   environment,
   environments,
@@ -2178,6 +2290,7 @@ function ServerSession({
 }: {
   slot: string;
   server: Server;
+  observationTargetId: string;
   servers: Server[];
   environment: RuntimeEnvironment;
   environments: RuntimeEnvironments;
@@ -2221,13 +2334,13 @@ function ServerSession({
   };
 
   return (
-    <section className={`server-session ${slot === "B" ? "target-session" : ""}`}>
+    <section className={`server-session ${slot === "B" ? "target-session" : ""}`} data-observation-container={observationTargetId}>
       <div className="session-caption">
         <div className={`session-slot ${slot === "B" ? "blue" : ""}`}><ServerIcon size={14} />{slot}</div>
         <div className="server-name"><strong>{server.hostname}</strong><span>Administrator · 接続中</span></div>
         <label className="server-picker"><span>接続先</span><select value={server.id} onChange={(event) => onServerChange(event.target.value)} aria-label={`${slot}側の接続先`}>{servers.map((item) => <option value={item.id} key={item.id}>{item.hostname}</option>)}</select><ChevronDown size={13} /></label>
       </div>
-      <div className="machine-window">
+      <div className="machine-window" data-observation-target={observationTargetId}>
         <div className="machine-titlebar"><div className="titlebar-product"><span className="windows-mark">⊞</span><span>{app ? managerTitle(app) : shellMode === "powershell" ? "Administrator: Windows PowerShell" : "Administrator: Command Prompt"}</span></div><div className="window-controls"><button aria-label="最小化">─</button><button aria-label="最大化">□</button><button className="window-close" aria-label="閉じる" onClick={onCloseApp}><X size={13} /></button></div></div>
         <div className="app-quickbar" aria-label="Windows管理ツール">
           <button className={app === "explorer" ? "quick-active" : ""} onClick={() => onOpenApp("explorer")} title="エクスプローラー"><FolderOpen size={14} /><span>Explorer</span></button>

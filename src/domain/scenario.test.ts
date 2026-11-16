@@ -99,22 +99,33 @@ describe("scenario integrity validation", () => {
     expect(() => loadScenario(invalidScenario)).toThrow("会議議題に推奨判断がありません");
   });
 
-  it("loads the optional observation story and all seven learning steps", () => {
+  it("loads observation enhancements linked to the full tutorial", () => {
     const scenario = loadScenario(scenarioDefinition);
 
     expect(scenario.storyMode?.enabled).toBe(true);
     expect(scenario.storyMode?.steps).toHaveLength(7);
-    expect(scenario.storyMode?.steps[4].failureBranch?.diagram).toContain("旧DNSキャッシュ (TTL 86400秒)");
+    expect(scenario.tutorialSteps).toHaveLength(26);
+    expect(scenario.storyMode?.steps.map((step) => step.tutorialStepId)).toContain("reduce-dns-ttl");
+    expect(scenario.storyMode?.steps[4]?.failureBranch?.diagram).toContain("旧DNSキャッシュ (TTL 86400秒)");
   });
 
   it("requires exactly one recommended answer in each story quiz", () => {
     const invalidScenario = structuredClone(scenarioDefinition);
-    const quiz = invalidScenario.storyMode.steps[4]?.quiz;
+    const quiz = invalidScenario.storyMode.steps.find((step) => step.tutorialStepId === "reduce-dns-ttl")?.quiz;
     if (!quiz) throw new Error("観察クイズがありません。");
     const firstChoice = quiz.choices[0];
     if (!firstChoice) throw new Error("観察クイズの選択肢がありません。");
     firstChoice.correct = true;
 
     expect(() => loadScenario(invalidScenario)).toThrow("観察クイズには推奨回答を1つだけ指定してください");
+  });
+
+  it("rejects observation enhancements linked to missing tutorial steps", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    const storyStep = invalidScenario.storyMode.steps[0];
+    if (!storyStep) throw new Error("観察モード設定がありません。");
+    storyStep.tutorialStepId = "missing-tutorial-step";
+
+    expect(() => loadScenario(invalidScenario)).toThrow("観察モードが参照するチュートリアル手順がありません");
   });
 });

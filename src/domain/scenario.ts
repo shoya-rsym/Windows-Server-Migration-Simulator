@@ -51,10 +51,7 @@ function addDuplicateIssues(
 const storyModeSchema = z.object({
   enabled: z.boolean(),
   steps: z.array(z.object({
-    id: z.string().min(1),
-    title: z.string().min(1),
-    targetElement: z.string().min(1),
-    explanation: z.string().min(1),
+    tutorialStepId: z.string().min(1),
     aiComment: z.string().min(1),
     autoActions: z.array(z.object({
       label: z.string().min(1),
@@ -567,15 +564,22 @@ const scenarioSchema = z.object({
   });
   if (scenario.storyMode) {
     const { steps } = scenario.storyMode;
-    addDuplicateIssues(steps.map((step) => step.id), context, ["storyMode", "steps"], "観察モード手順ID");
-    if (scenario.storyMode.enabled && steps.length === 0) {
+    addDuplicateIssues(steps.map((step) => step.tutorialStepId), context, ["storyMode", "steps"], "観察モードのチュートリアル参照");
+    if (scenario.storyMode.enabled && scenario.tutorialSteps.length === 0) {
       context.addIssue({
         code: "custom",
-        message: "観察モードを有効にする場合は手順を1件以上指定してください。",
-        path: ["storyMode", "steps"],
+        message: "観察モードを有効にする場合はチュートリアル手順を1件以上指定してください。",
+        path: ["tutorialSteps"],
       });
     }
     steps.forEach((step, index) => {
+      if (!scenario.tutorialSteps.some((tutorialStep) => tutorialStep.id === step.tutorialStepId)) {
+        context.addIssue({
+          code: "custom",
+          message: `観察モードが参照するチュートリアル手順がありません: ${step.tutorialStepId}`,
+          path: ["storyMode", "steps", index, "tutorialStepId"],
+        });
+      }
       if (step.quiz) {
         addDuplicateIssues(step.quiz.choices.map((choice) => choice.id), context, ["storyMode", "steps", index, "quiz", "choices"], "観察クイズ選択肢ID");
         if (step.quiz.choices.filter((choice) => choice.correct).length !== 1) {
