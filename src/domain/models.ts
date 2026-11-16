@@ -99,6 +99,29 @@ export interface ProjectEffortPackage {
   actualPersonHours: number;
 }
 
+export interface ProjectMeeting {
+  id: string;
+  title: string;
+  scheduledAt: string;
+  participants: string[];
+  purpose: string;
+  agendaItems: Array<{
+    id: string;
+    title: string;
+    discussion: string;
+    planAlignment?: {
+      field: "rollbackPlan";
+      requiredTerms: string[];
+    };
+    choices: Array<{
+      id: string;
+      label: string;
+      decision: string;
+      recommended: boolean;
+    }>;
+  }>;
+}
+
 export interface ProjectDecisionEvidence {
   id: string;
   decisionId: string;
@@ -125,6 +148,11 @@ export interface ProjectWorkspace {
   readDocumentIds: string[];
   readMailIds: string[];
   chatResponses: Array<{ threadId: string; choiceId: string; chosenAt: number }>;
+  meetingRecords: Array<{
+    meetingId: string;
+    recordedAt: number;
+    decisions: Array<{ agendaItemId: string; choiceId: string }>;
+  }>;
   decisionEvidence: ProjectDecisionEvidence[];
   estimatedPersonHours: number | null;
   estimateRationale: string;
@@ -276,6 +304,7 @@ export interface Scenario {
   projectMails: ProjectMailMessage[];
   projectChats: ProjectChatThread[];
   projectEffortPackages: ProjectEffortPackage[];
+  projectMeetings: ProjectMeeting[];
   assets: {
     servers: Server[];
     vms: VM[];

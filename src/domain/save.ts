@@ -83,6 +83,14 @@ const projectWorkspaceSchema = z.object({
     choiceId: z.string(),
     chosenAt: z.number(),
   })).default([]),
+  meetingRecords: z.array(z.object({
+    meetingId: z.string(),
+    recordedAt: z.number(),
+    decisions: z.array(z.object({
+      agendaItemId: z.string(),
+      choiceId: z.string(),
+    })),
+  })).default([]),
   decisionEvidence: z.array(z.object({
     id: z.string(),
     decisionId: z.string(),

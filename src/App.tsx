@@ -1434,7 +1434,7 @@ function ProjectDeskPanel({
   onRollback: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "teams" | "effort" | "plan" | "cutover">("overview");
+  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "teams" | "meetings" | "effort" | "plan" | "cutover">("overview");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDetail, setNoteDetail] = useState("");
   const [edgeFrom, setEdgeFrom] = useState("");
@@ -1443,6 +1443,8 @@ function ProjectDeskPanel({
   const [selectedReviewId, setSelectedReviewId] = useState(scenario.decisionReviews[0]?.id ?? "");
   const [selectedMailId, setSelectedMailId] = useState("");
   const [selectedChatId, setSelectedChatId] = useState(scenario.projectChats[0]?.id ?? "");
+  const [selectedMeetingId, setSelectedMeetingId] = useState(scenario.projectMeetings[0]?.id ?? "");
+  const [meetingChoiceIds, setMeetingChoiceIds] = useState<Record<string, string>>({});
   const [evidenceDocumentId, setEvidenceDocumentId] = useState("");
   const [evidenceSectionId, setEvidenceSectionId] = useState("");
   const [decisionOption, setDecisionOption] = useState("");
@@ -1456,6 +1458,8 @@ function ProjectDeskPanel({
   const selectedReview = scenario.decisionReviews.find((review) => review.id === selectedReviewId);
   const selectedMail = scenario.projectMails.find((mail) => mail.id === selectedMailId);
   const selectedChat = scenario.projectChats.find((chat) => chat.id === selectedChatId);
+  const selectedMeeting = scenario.projectMeetings.find((meeting) => meeting.id === selectedMeetingId);
+  const selectedMeetingRecord = selectedMeeting && project.meetingRecords.find((record) => record.meetingId === selectedMeeting.id);
   const selectedChatResponse = selectedChat && project.chatResponses.find((response) => response.threadId === selectedChat.id);
   const selectedChatChoice = selectedChat?.choices.find((choice) => choice.id === selectedChatResponse?.choiceId);
   const citedDocument = scenario.projectDocuments.find((document) => document.id === evidenceDocumentId);
@@ -1480,6 +1484,21 @@ function ProjectDeskPanel({
       chatResponses: [
         ...project.chatResponses.filter((response) => response.threadId !== threadId),
         { threadId, choiceId, chosenAt: Date.now() },
+      ],
+    });
+  };
+
+  const createMeetingMinutes = () => {
+    if (!selectedMeeting || selectedMeetingRecord) return;
+    const decisions = selectedMeeting.agendaItems.map((agendaItem) => ({
+      agendaItemId: agendaItem.id,
+      choiceId: meetingChoiceIds[`${selectedMeeting.id}:${agendaItem.id}`] ?? "",
+    }));
+    if (decisions.some((decision) => !decision.choiceId)) return;
+    update({
+      meetingRecords: [
+        ...project.meetingRecords.filter((record) => record.meetingId !== selectedMeeting.id),
+        { meetingId: selectedMeeting.id, recordedAt: Date.now(), decisions },
       ],
     });
   };
@@ -1566,6 +1585,7 @@ function ProjectDeskPanel({
     { id: "documents", label: "案件資料・判断根拠" },
     { id: "mail", label: `メール (${scenario.projectMails.filter((mail) => mail.importance === "high" && !project.readMailIds.includes(mail.id)).length} 未読)` },
     { id: "teams", label: `Teams (${scenario.projectChats.filter((chat) => !project.chatResponses.some((response) => response.threadId === chat.id)).length} 未回答)` },
+    { id: "meetings", label: `会議・議事録 (${scenario.projectMeetings.filter((meeting) => !project.meetingRecords.some((record) => record.meetingId === meeting.id)).length} 未作成)` },
     { id: "effort", label: "工数見積" },
     { id: "plan", label: "計画・周知" },
     { id: "cutover", label: "切替判断" },
@@ -1726,6 +1746,62 @@ function ProjectDeskPanel({
                 : <p className="project-empty">関係者を選択してください。</p>}
             </section>
           </div>
+        </div>}
+
+        {tab === "meetings" && <div className="project-tab-content">
+          <div className="project-meeting-toolbar"><strong>会議・議事録</strong><span>関係者と判断を合意し、選択内容から議事録を作成します。</span></div>
+          {scenario.projectMeetings.length === 0
+            ? <p className="project-empty">予定されている会議はありません。</p>
+            : <div className="project-meeting-layout">
+              <section className="project-section project-meeting-list">
+                <h3>会議予定</h3>
+                {scenario.projectMeetings.map((meeting) => {
+                  const recorded = project.meetingRecords.some((record) => record.meetingId === meeting.id);
+                  return <button className={selectedMeetingId === meeting.id ? "active" : ""} key={meeting.id} onClick={() => setSelectedMeetingId(meeting.id)}>
+                    <strong>{meeting.title}</strong><small>{meeting.scheduledAt}</small><em>{recorded ? "議事録作成済み" : "未作成"}</em>
+                  </button>;
+                })}
+              </section>
+              <section className="project-section project-meeting-detail">
+                {selectedMeeting
+                  ? <>
+                    <header><small>{selectedMeeting.scheduledAt}</small><h3>{selectedMeeting.title}</h3><p>{selectedMeeting.purpose}</p><small>参加者: {selectedMeeting.participants.join(" · ")}</small></header>
+                    <h4>議題と判断</h4>
+                    {selectedMeeting.agendaItems.map((agendaItem) => {
+                      const choiceKey = `${selectedMeeting.id}:${agendaItem.id}`;
+                      const recordedChoiceId = selectedMeetingRecord?.decisions.find((decision) => decision.agendaItemId === agendaItem.id)?.choiceId;
+                      const selectedChoiceId = recordedChoiceId ?? meetingChoiceIds[choiceKey];
+                      const selectedChoice = agendaItem.choices.find((choice) => choice.id === selectedChoiceId);
+                      const planAligned = !agendaItem.planAlignment
+                        || agendaItem.planAlignment.requiredTerms.every((term) =>
+                          project.rollbackPlan.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
+                        );
+                      return <article className="project-meeting-agenda" key={agendaItem.id}>
+                        <strong>{agendaItem.title}</strong>
+                        <p>{agendaItem.discussion}</p>
+                        {!selectedMeetingRecord
+                          ? <div className="project-meeting-choices">{agendaItem.choices.map((choice) => <button
+                            className={selectedChoiceId === choice.id ? "selected" : ""}
+                            key={choice.id}
+                            onClick={() => setMeetingChoiceIds((current) => ({ ...current, [choiceKey]: choice.id }))}
+                          ><strong>{choice.label}</strong><small>{choice.decision}</small></button>)}</div>
+                          : <div className={`project-meeting-minuted ${selectedChoice?.recommended && planAligned ? "safe" : "risk"}`}>
+                            <small>{!selectedChoice?.recommended ? "リスクを含む決定" : planAligned ? "合意した決定・計画反映済み" : "合意事項が作業計画に未反映"}</small>
+                            <p>{selectedChoice?.decision ?? "選択された判断が見つかりません。"}</p>
+                          </div>}
+                      </article>;
+                    })}
+                    {selectedMeetingRecord
+                      ? <p className="project-plan-note">議事録を確定しました: {new Date(selectedMeetingRecord.recordedAt).toLocaleString()}。作業計画と切戻し条件へ反映してください。</p>
+                      : <button
+                        className="project-primary-button"
+                        disabled={selectedMeeting.agendaItems.some((agendaItem) => !meetingChoiceIds[`${selectedMeeting.id}:${agendaItem.id}`])}
+                        onClick={createMeetingMinutes}
+                      >議事録を確定</button>}
+                  </>
+                  : <p className="project-empty">会議を選択してください。</p>}
+              </section>
+            </div>}
         </div>}
 
         {tab === "effort" && <div className="project-tab-content project-columns">
@@ -1929,6 +2005,15 @@ function AuditReportModal({
           <div className="report-quality-heading"><h3>案件品質評価</h3><strong>総合評価: {report.overallGrade}</strong></div>
           <div className="report-quality-grid">{report.projectScores.map((item) => <article key={item.id}><small>{item.label}</small><strong>{item.score}<span>点</span></strong></article>)}</div>
         </section>
+        {report.meetingReviews.length > 0 && <section className="report-meetings">
+          <h3>会議・議事録レビュー</h3>
+          {report.meetingReviews.map((meeting) => <article key={meeting.meetingId}>
+            <strong>{meeting.title} · {meeting.recorded ? `${meeting.score}点` : "議事録未作成"}</strong>
+            {meeting.decisions.map((decision) => <small key={decision.agendaItemId}>
+              {decision.title}: {decision.choiceLabel ?? "未決定"}{decision.choiceLabel && !decision.recommended ? " · リスクあり" : ""}{decision.recommended && !decision.planAligned ? " · 計画未反映" : ""}
+            </small>)}
+          </article>)}
+        </section>}
         {report.effortEstimate.estimatedPersonHours !== null && <section className="report-effort">
           <strong>工数見積: {report.effortEstimate.estimatedPersonHours.toFixed(1)} 人時</strong>
           <span>モデル実績: {report.effortEstimate.actualPersonHours.toFixed(1)} 人時</span>

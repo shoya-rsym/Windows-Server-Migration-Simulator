@@ -315,6 +315,59 @@
       "actualPersonHours": 6
     }
   ],
+  "projectMeetings": [
+    {
+      "id": "migration-readiness",
+      "title": "移行計画レビュー会議",
+      "scheduledAt": "2026-11-05 14:00",
+      "participants": ["顧客業務責任者", "運用担当", "ネットワーク担当", "DBA", "プロジェクトマネージャー"],
+      "purpose": "停止枠、最終同期、Go/No-Go、切戻しの条件を合意し、作業計画へ反映する。",
+      "agendaItems": [
+        {
+          "id": "rollback-deadline",
+          "title": "切戻し判断の期限",
+          "discussion": "本番切替後、主要業務の確認が完了しない場合の判断期限を決めます。議事録では切替後30分以内の判断と、データ不整合時の切戻しが合意されています。",
+          "planAlignment": {
+            "field": "rollbackPlan",
+            "requiredTerms": ["30分", "データ不整合", "DNS"]
+          },
+          "choices": [
+            {
+              "id": "rollback-30-minutes",
+              "label": "30分以内に判定",
+              "decision": "切替後30分以内に主要業務の確認が完了しない場合、またはデータ不整合があれば切戻しを判断する。DNSを戻した後のキャッシュと旧環境も確認する。",
+              "recommended": true
+            },
+            {
+              "id": "rollback-3-hours",
+              "label": "3時間後に判定",
+              "decision": "業務確認が終わらなくても3時間は切替先で調査を続け、切戻し判断は後回しにする。",
+              "recommended": false
+            }
+          ]
+        },
+        {
+          "id": "final-data-sync",
+          "title": "最終同期と業務更新",
+          "discussion": "Data PumpやRMANの完了だけでは、その後の業務更新が移行先へ自動反映されるとは限りません。停止中の更新制御、最終同期、データ世代の一致確認を決めます。",
+          "choices": [
+            {
+              "id": "sync-before-go",
+              "label": "更新停止後に最終同期・整合性確認",
+              "decision": "切替直前に業務更新を停止し、最終同期とデータ件数・主要業務の整合性を確認してからGo/No-Goを判定する。",
+              "recommended": true
+            },
+            {
+              "id": "trust-initial-import",
+              "label": "初回インポート完了をもって同期済みとする",
+              "decision": "Data Pumpの初回インポートが完了していれば、その後の更新確認は省略してDNSを切り替える。",
+              "recommended": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
   "assets": {
     "servers": [
       { "id": "ap-old", "hostname": "APSV01", "role": "application", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },

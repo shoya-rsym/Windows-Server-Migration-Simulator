@@ -15,6 +15,7 @@ function createProject(): ProjectWorkspace {
     readDocumentIds: [],
     readMailIds: [],
     chatResponses: [],
+    meetingRecords: [],
     decisionEvidence: [],
     estimatedPersonHours: null,
     estimateRationale: "",
@@ -63,6 +64,28 @@ describe("cutover readiness", () => {
 
     expect(readinessItem(events, "connectivity")?.ready).toBe(false);
     expect(readinessItem(events, "user-notice")?.ready).toBe(false);
+  });
+
+  it("requires meeting minutes and alignment of agreed rollback terms", () => {
+    const meeting = scenario.projectMeetings[0];
+    if (!meeting) throw new Error("Meeting fixture is missing.");
+    const project = createProject();
+    project.meetingRecords = [{
+      meetingId: meeting.id,
+      recordedAt: 1,
+      decisions: meeting.agendaItems.map((agendaItem) => {
+        const choice = agendaItem.choices.find((item) => item.recommended);
+        if (!choice) throw new Error(`Meeting choice fixture is missing: ${agendaItem.id}`);
+        return { agendaItemId: agendaItem.id, choiceId: choice.id };
+      }),
+    }];
+
+    expect(getCutoverReadiness(scenario, [], createProject(), false)
+      .find((item) => item.id === "meeting-decisions")?.ready).toBe(false);
+
+    project.rollbackPlan = "30分以内に判断し、データ不整合があればDNSを旧環境へ戻す";
+    expect(getCutoverReadiness(scenario, [], project, false)
+      .find((item) => item.id === "meeting-decisions")?.ready).toBe(true);
   });
 });
 

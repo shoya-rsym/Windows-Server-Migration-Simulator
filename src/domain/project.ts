@@ -7,6 +7,7 @@ export function createInitialProjectWorkspace(brief: ProjectBrief): ProjectWorks
     readDocumentIds: [],
     readMailIds: [],
     chatResponses: [],
+    meetingRecords: [],
     decisionEvidence: [],
     estimatedPersonHours: null,
     estimateRationale: "",

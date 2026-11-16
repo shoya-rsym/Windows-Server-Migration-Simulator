@@ -197,7 +197,15 @@ describe("migration project workflows", () => {
       ttlLeadDays: 3,
       noticeLeadDays: 1,
       noticeSent: true,
-      rollbackPlan: "23:30までにDNSを旧APへ戻し、利用者へ連絡します。",
+      rollbackPlan: "切替後30分以内に判断し、データ不整合があればDNSを旧APへ戻し、利用者へ連絡します。",
+      meetingRecords: scenario.projectMeetings.map((meeting) => ({
+        meetingId: meeting.id,
+        recordedAt: 1,
+        decisions: meeting.agendaItems.flatMap((agendaItem) => {
+          const choice = agendaItem.choices.find((item) => item.recommended);
+          return choice ? [{ agendaItemId: agendaItem.id, choiceId: choice.id }] : [];
+        }),
+      })),
     };
     const events: AuditEvent[] = [
       { name: "database:expdp-export", at: 1 },

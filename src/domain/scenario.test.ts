@@ -52,6 +52,7 @@ describe("scenario integrity validation", () => {
       projectMails: _projectMails,
       projectChats: _projectChats,
       projectEffortPackages: _projectEffortPackages,
+      projectMeetings: _projectMeetings,
       ...legacyScenario
     } = structuredClone(scenarioDefinition);
 
@@ -61,6 +62,7 @@ describe("scenario integrity validation", () => {
       projectMails: [],
       projectChats: [],
       projectEffortPackages: [],
+      projectMeetings: [],
     });
   });
 
@@ -83,5 +85,14 @@ describe("scenario integrity validation", () => {
     invalidScenario.projectEffortPackages[0].requiredEvents = ["migration:unknown-event"];
 
     expect(() => loadScenario(invalidScenario)).toThrow("工数見積の作業イベントが見つかりません");
+  });
+
+  it("rejects meeting agenda items without a recommended decision", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    invalidScenario.projectMeetings[0].agendaItems[0].choices.forEach((choice) => {
+      choice.recommended = false;
+    });
+
+    expect(() => loadScenario(invalidScenario)).toThrow("会議議題に推奨判断がありません");
   });
 });

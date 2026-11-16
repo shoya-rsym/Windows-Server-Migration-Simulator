@@ -94,6 +94,7 @@ export interface AuditReport {
   recoveryMinutes: number | null;
   orderWarnings: string[];
   projectScores: Array<{ id: string; label: string; score: number }>;
+  meetingReviews: ProjectMeetingEvaluation[];
   effortEstimate: ProjectEffortEvaluation;
   evidenceReviews: ProjectEvidenceReview[];
   projectFindings: Array<{ id: string; title: string; remediation: string }>;
@@ -119,6 +120,20 @@ export interface ProjectEvidenceReview {
   matchedPoints: string[];
   missingPoints: string[];
   feedback: string;
+}
+
+export interface ProjectMeetingEvaluation {
+  meetingId: string;
+  title: string;
+  recorded: boolean;
+  score: number;
+  decisions: Array<{
+    agendaItemId: string;
+    title: string;
+    choiceLabel: string | null;
+    recommended: boolean;
+    planAligned: boolean;
+  }>;
 }
 
 export interface CutoverReadinessItem {
@@ -147,6 +162,7 @@ export function getCutoverReadiness(
     databaseSyncPending,
     evaluateProjectEvidence(scenario, project),
     evaluateEffortEstimate(scenario, deriveTutorialEvents(events, scenario, project, []), events, project),
+    evaluateProjectMeetings(scenario, project),
   ).map((finding) => finding.id));
   const migrationChangeIndex = events.reduce((latestIndex, event, index) =>
     index > rollbackIndex && index < cycleEndIndex && isCutoverPreflightInvalidator(event.name)
@@ -203,6 +219,12 @@ export function getCutoverReadiness(
       title: "切戻し条件と手順",
       ready: !findings.has("rollback-plan"),
       detail: "判断期限、DNSを戻す手順、旧環境の維持時間、利用者連絡方法を具体化してください。",
+    },
+    {
+      id: "meeting-decisions",
+      title: "会議の合意事項と作業計画",
+      ready: !findings.has("meeting-minutes-missing") && !findings.has("risky-meeting-decision"),
+      detail: "議事録を作成し、切戻し期限などの合意を実際の作業計画へ反映してください。",
     },
     {
       id: "unresolved-issues",
@@ -378,6 +400,7 @@ export function calculateAuditReport(
     readDocumentIds: [],
     readMailIds: [],
     chatResponses: [],
+    meetingRecords: [],
     decisionEvidence: [],
     estimatedPersonHours: null,
     estimateRationale: "",
@@ -400,6 +423,7 @@ export function calculateAuditReport(
   const effortEvents = deriveTutorialEvents(events, scenario, project, []);
   const effortEstimate = evaluateEffortEstimate(scenario, effortEvents, events, project);
   const evidenceReviews = evaluateProjectEvidence(scenario, project);
+  const meetingReviews = evaluateProjectMeetings(scenario, project);
   const projectScores = calculateProjectScores(
     scenario,
     events,
@@ -410,6 +434,7 @@ export function calculateAuditReport(
     databaseMigrationComplete,
     evidenceReviews,
     effortEstimate,
+    meetingReviews,
   );
   const projectFindings = getProjectFindings(
     scenario,
@@ -418,6 +443,7 @@ export function calculateAuditReport(
     dataSyncPending,
     evidenceReviews,
     effortEstimate,
+    meetingReviews,
   );
   const averageScore = Math.round(projectScores.reduce((total, item) => total + item.score, 0) / projectScores.length);
   const overallGrade = gradeFor(averageScore);
@@ -432,6 +458,7 @@ export function calculateAuditReport(
     recoveryMinutes,
     orderWarnings,
     projectScores,
+    meetingReviews,
     effortEstimate,
     evidenceReviews,
     projectFindings,
@@ -495,6 +522,40 @@ export function evaluateProjectEvidence(
       matchedPoints,
       missingPoints,
       feedback,
+    };
+  });
+}
+
+export function evaluateProjectMeetings(
+  scenario: Scenario,
+  project: ProjectWorkspace,
+): ProjectMeetingEvaluation[] {
+  return scenario.projectMeetings.map((meeting) => {
+    const record = project.meetingRecords.find((item) => item.meetingId === meeting.id);
+    const decisions = meeting.agendaItems.map((agendaItem) => {
+      const selectedDecision = record?.decisions.find((item) => item.agendaItemId === agendaItem.id);
+      const choice = agendaItem.choices.find((item) => item.id === selectedDecision?.choiceId);
+      const planAligned = !agendaItem.planAlignment
+        || agendaItem.planAlignment.requiredTerms.every((term) =>
+          project.rollbackPlan.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
+        );
+      return {
+        agendaItemId: agendaItem.id,
+        title: agendaItem.title,
+        choiceLabel: choice?.label ?? null,
+        recommended: choice?.recommended ?? false,
+        planAligned,
+      };
+    });
+    const score = record
+      ? Math.round(decisions.filter((decision) => decision.recommended && decision.planAligned).length / meeting.agendaItems.length * 100)
+      : 0;
+    return {
+      meetingId: meeting.id,
+      title: meeting.title,
+      recorded: Boolean(record),
+      score,
+      decisions,
     };
   });
 }
@@ -569,6 +630,7 @@ function calculateProjectScores(
   databaseMigrationComplete: boolean,
   evidenceReviews?: ProjectEvidenceReview[],
   effortEstimate?: ProjectEffortEvaluation,
+  meetingReviews?: ProjectMeetingEvaluation[],
 ): AuditReport["projectScores"] {
   const eventNames = new Set(events.map((event) => event.name));
   const investigationEvents = events.filter((event) => event.name.startsWith("inspect:") || event.name.startsWith("investigate:"));
@@ -622,6 +684,10 @@ function calculateProjectScores(
     }, 0) / scenario.projectChats.length);
   const coordinationScore = Math.round((mailReviewScore + chatResponseScore) / 2);
   const estimateScore = effortEstimate?.score ?? evaluateEffortEstimate(scenario, events, events, project).score;
+  const meetingScore = scenario.projectMeetings.length === 0
+    ? 100
+    : Math.round((meetingReviews ?? evaluateProjectMeetings(scenario, project))
+      .reduce((total, meeting) => total + meeting.score, 0) / scenario.projectMeetings.length);
   const riskScore = scenario.decisionReviews.length === 0
     ? 100
     : Math.round((evidenceReviews ?? evaluateProjectEvidence(scenario, project))
@@ -633,6 +699,7 @@ function calculateProjectScores(
     { id: "risk", label: "リスク管理・判断根拠", score: riskScore },
     { id: "coordination", label: "関係者調整", score: coordinationScore },
     { id: "effort-estimate", label: "工数見積", score: estimateScore },
+    { id: "meetings", label: "会議・議事録", score: meetingScore },
     { id: "migration", label: "移行品質", score: Math.max(0, migrationRate - (dataSyncPending ? 20 : 0) - (databaseMigrationComplete ? 0 : 20)) },
     { id: "incident", label: "障害対応", score: incidentResponseScore },
     { id: "security", label: "セキュリティ", score: securityScore },
@@ -668,6 +735,7 @@ function getProjectFindings(
   dataSyncPending: boolean,
   evidenceReviews: ProjectEvidenceReview[],
   effortEstimate: ProjectEffortEvaluation,
+  meetingReviews: ProjectMeetingEvaluation[],
 ): AuditReport["projectFindings"] {
   const findings: AuditReport["projectFindings"] = [];
   const capturedNotes = project.investigationNotes.filter((note) => note.title.trim() && note.detail.trim());
@@ -716,6 +784,26 @@ function getProjectFindings(
       id: "risky-stakeholder-reply",
       title: `関係者との合意にリスクが残っています (${riskyChatReplies.join("、")})`,
       remediation: "「Teams」の会話と根拠資料を読み直し、TTLの事前短縮、最終同期、停止枠、切戻し条件について関係者と安全な手順を合意してください。",
+    });
+  }
+  const missingMeetingMinutes = meetingReviews.filter((meeting) => !meeting.recorded);
+  if (missingMeetingMinutes.length > 0) {
+    findings.push({
+      id: "meeting-minutes-missing",
+      title: `会議の議事録が未作成です (${missingMeetingMinutes.map((meeting) => meeting.title).join("、")})`,
+      remediation: "案件デスクの「会議・議事録」で関係者と議題を確認し、判断を合意して議事録を確定してください。",
+    });
+  }
+  const riskyMeetingDecisions = meetingReviews.flatMap((meeting) =>
+    meeting.decisions.filter((decision) =>
+      meeting.recorded && (!decision.recommended || !decision.planAligned),
+    ).map((decision) => `${meeting.title}: ${decision.title}`),
+  );
+  if (riskyMeetingDecisions.length > 0) {
+    findings.push({
+      id: "risky-meeting-decision",
+      title: `会議で未解決のリスク判断があります (${riskyMeetingDecisions.join("、")})`,
+      remediation: "議事録の決定を根拠資料と照合し、切戻し期限とデータ同期条件を計画へ反映してください。",
     });
   }
   if (scenario.projectEffortPackages.length > 0

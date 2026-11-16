@@ -118,6 +118,28 @@ const scenarioSchema = z.object({
     requiredEvents: z.array(z.string().min(1)).min(1),
     actualPersonHours: z.number().positive(),
   })).default([]),
+  projectMeetings: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    scheduledAt: z.string().min(1),
+    participants: z.array(z.string().min(1)).min(1),
+    purpose: z.string().min(1),
+    agendaItems: z.array(z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      discussion: z.string().min(1),
+      planAlignment: z.object({
+        field: z.literal("rollbackPlan"),
+        requiredTerms: z.array(z.string().min(1)).min(1),
+      }).optional(),
+      choices: z.array(z.object({
+        id: z.string().min(1),
+        label: z.string().min(1),
+        decision: z.string().min(1),
+        recommended: z.boolean(),
+      })).min(2),
+    })).min(1),
+  })).default([]),
   assets: z.object({
     servers: z.array(z.object({
       id: z.string(),
@@ -265,6 +287,7 @@ const scenarioSchema = z.object({
   addDuplicateIssues(scenario.projectMails.map((item) => item.id), context, ["projectMails"], "案件メールID");
   addDuplicateIssues(scenario.projectChats.map((item) => item.id), context, ["projectChats"], "Teams会話ID");
   addDuplicateIssues(scenario.projectEffortPackages.map((item) => item.id), context, ["projectEffortPackages"], "工数パッケージID");
+  addDuplicateIssues(scenario.projectMeetings.map((item) => item.id), context, ["projectMeetings"], "会議ID");
   scenario.projectDocuments.forEach((document, index) => {
     addDuplicateIssues(document.sections.map((section) => section.id), context, ["projectDocuments", index, "sections"], "資料セクションID");
   });
@@ -312,6 +335,24 @@ const scenarioSchema = z.object({
           code: "custom",
           message: `工数見積の作業イベントが見つかりません: ${event}`,
           path: ["projectEffortPackages", index, "requiredEvents"],
+        });
+      }
+    });
+  });
+  scenario.projectMeetings.forEach((meeting, index) => {
+    addDuplicateIssues(meeting.agendaItems.map((item) => item.id), context, ["projectMeetings", index, "agendaItems"], "会議議題ID");
+    meeting.agendaItems.forEach((agendaItem, agendaIndex) => {
+      addDuplicateIssues(
+        agendaItem.choices.map((choice) => choice.id),
+        context,
+        ["projectMeetings", index, "agendaItems", agendaIndex, "choices"],
+        "会議判断ID",
+      );
+      if (!agendaItem.choices.some((choice) => choice.recommended)) {
+        context.addIssue({
+          code: "custom",
+          message: `会議議題に推奨判断がありません: ${agendaItem.id}`,
+          path: ["projectMeetings", index, "agendaItems", agendaIndex, "choices"],
         });
       }
     });
