@@ -69,6 +69,7 @@ describe("simulation saves", () => {
     const save = createSave();
     const {
       readDocumentIds: _readDocumentIds,
+      readMailIds: _readMailIds,
       decisionEvidence: _decisionEvidence,
       ...legacyProjectWorkspace
     } = save.projectWorkspace;
@@ -79,6 +80,7 @@ describe("simulation saves", () => {
 
     expect(parsed?.projectWorkspace).toMatchObject({
       readDocumentIds: [],
+      readMailIds: [],
       decisionEvidence: [],
     });
   });

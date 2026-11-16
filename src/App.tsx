@@ -20,6 +20,7 @@ import {
   Lightbulb,
   ListTodo,
   LockKeyhole,
+  Mail,
   MessageCircle,
   Monitor,
   Power,
@@ -1024,7 +1025,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       <header className="lab-header">
         <div className="lab-brand">
           <div className="lab-brand-icon"><Monitor size={19} /></div>
-          <div><strong>SERVER<span>LAB</span></strong><small>WINDOWS MIGRATION SIMULATOR</small></div>
+          <div><strong>PROJECT<span>LAB</span></strong><small>SYSTEM ENGINEER PROJECT SIMULATOR</small></div>
         </div>
         <div className="header-request">
           <span className="request-mark"><Activity size={14} /></span>
@@ -1364,9 +1365,9 @@ function DesktopHome({
         />}
 
         <section className="desktop-connect-window">
-          <div className="desktop-window-title"><div><Monitor size={15} /><strong>Windows Server Migration Lab</strong></div><span>─　□　×</span></div>
+          <div className="desktop-window-title"><div><Monitor size={15} /><strong>System Engineer Project Simulator</strong></div><span>─　□　×</span></div>
           <div className="desktop-connect-content">
-            <div className="desktop-connect-heading"><div className="desktop-logo"><Monitor size={24} /></div><div><h1>リモート デスクトップ接続</h1><p>調査から切替・障害対応までをサーバー操作で体験します。</p></div></div>
+            <div className="desktop-connect-heading"><div className="desktop-logo"><Monitor size={24} /></div><div><h1>リモート デスクトップ接続</h1><p>資料調査、関係者調整、移行判断、技術作業まで案件全体を体験します。</p></div></div>
             <label className="desktop-setting-row"><span>案件</span><select value={scenario.id} onChange={(event) => onScenarioChange(event.target.value)}>{scenarios.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
             <label className="desktop-setting-row"><span>基盤</span><select value={provider} onChange={(event) => onProviderChange(event.target.value as DeploymentProvider)}><option value="onprem">オンプレミス</option><option value="aws">AWS</option><option value="azure">Azure</option></select></label>
             <label className="desktop-setting-row"><span>接続先</span><select value={selectedServer?.id ?? availableServers[0]?.id ?? ""} onChange={(event) => onServerChange(event.target.value)}>{availableServers.map((server) => <option value={server.id} key={server.id}>{server.hostname} — {server.role}</option>)}</select></label>
@@ -1395,7 +1396,7 @@ function DesktopHome({
 
         <div className="desktop-selection-hint"><strong>{selectedLabel}</strong><span>を選択中 — 接続後に対応する疑似アプリを開きます</span></div>
         {saved && <button className="desktop-reset" onClick={onStartOver}><RotateCcw size={12} />保存状態を破棄</button>}
-        <div className="windows-taskbar"><button className="taskbar-start-mark" title="スタート">⊞</button><span className="taskbar-search">検索</span><span className="taskbar-open-app"><Monitor size={14} /> Migration Lab</span><span className="taskbar-clock">11:14　2026/11/12</span></div>
+        <div className="windows-taskbar"><button className="taskbar-start-mark" title="スタート">⊞</button><span className="taskbar-search">検索</span><span className="taskbar-open-app"><Monitor size={14} /> Project Simulator</span><span className="taskbar-clock">11:14　2026/11/12</span></div>
       </div>
     </main>
   );
@@ -1430,13 +1431,14 @@ function ProjectDeskPanel({
   onRollback: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "plan" | "cutover">("overview");
+  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "plan" | "cutover">("overview");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDetail, setNoteDetail] = useState("");
   const [edgeFrom, setEdgeFrom] = useState("");
   const [edgeTo, setEdgeTo] = useState("");
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedReviewId, setSelectedReviewId] = useState(scenario.decisionReviews[0]?.id ?? "");
+  const [selectedMailId, setSelectedMailId] = useState("");
   const [evidenceDocumentId, setEvidenceDocumentId] = useState("");
   const [evidenceSectionId, setEvidenceSectionId] = useState("");
   const [decisionOption, setDecisionOption] = useState("");
@@ -1444,12 +1446,20 @@ function ProjectDeskPanel({
   const update = (patch: Partial<ProjectWorkspace>) => onChange({ ...project, ...patch });
   const selectedDocument = scenario.projectDocuments.find((document) => document.id === selectedDocumentId);
   const selectedReview = scenario.decisionReviews.find((review) => review.id === selectedReviewId);
+  const selectedMail = scenario.projectMails.find((mail) => mail.id === selectedMailId);
   const citedDocument = scenario.projectDocuments.find((document) => document.id === evidenceDocumentId);
 
   const openDocument = (document: ProjectDocument) => {
     setSelectedDocumentId(document.id);
     if (!project.readDocumentIds.includes(document.id)) {
       update({ readDocumentIds: [...project.readDocumentIds, document.id] });
+    }
+  };
+
+  const openMail = (mailId: string) => {
+    setSelectedMailId(mailId);
+    if (!project.readMailIds.includes(mailId)) {
+      update({ readMailIds: [...project.readMailIds, mailId] });
     }
   };
 
@@ -1510,6 +1520,7 @@ function ProjectDeskPanel({
     { id: "overview", label: "案件概要" },
     { id: "investigation", label: "調査・構成" },
     { id: "documents", label: "案件資料・判断根拠" },
+    { id: "mail", label: `メール (${scenario.projectMails.filter((mail) => mail.importance === "high" && !project.readMailIds.includes(mail.id)).length} 未読)` },
     { id: "plan", label: "計画・周知" },
     { id: "cutover", label: "切替判断" },
   ];
@@ -1596,6 +1607,42 @@ function ProjectDeskPanel({
                 const section = document?.sections.find((candidate) => candidate.id === item.sectionId);
                 return <article key={item.id}><div><strong>{review?.title ?? item.decisionId}</strong><button onClick={() => update({ decisionEvidence: project.decisionEvidence.filter((entry) => entry.id !== item.id) })} aria-label={`${review?.title ?? item.decisionId}の根拠を削除`}><X size={13} /></button></div><p>判断: {item.selectedOption}<br />根拠: {document?.title ?? "資料なし"} / {section?.title ?? "箇所なし"}<br />{item.rationale}</p></article>;
               })}</div>}
+            </section>
+          </div>
+        </div>}
+
+        {tab === "mail" && <div className="project-tab-content">
+          <div className="project-mail-toolbar"><Mail size={15} /><strong>受信トレイ</strong><span>案件関係者からの連絡を確認し、判断・計画へ反映してください。</span></div>
+          <div className="project-mail-layout">
+            <section className="project-section project-mail-inbox">
+              <h3>受信メール ({scenario.projectMails.length})</h3>
+              {scenario.projectMails.length === 0
+                ? <p className="project-empty">受信メールはありません。</p>
+                : scenario.projectMails.map((mail) => <button
+                  className={`${selectedMailId === mail.id ? "active" : ""} ${mail.importance === "high" ? "priority" : ""}`}
+                  key={mail.id}
+                  onClick={() => openMail(mail.id)}
+                >
+                  <span><strong>{mail.senderRole} · {mail.sender.split("@")[0]}</strong><small>{mail.subject}</small><small>{mail.receivedAt}</small></span>
+                  {!project.readMailIds.includes(mail.id) && <em>{mail.importance === "high" ? "重要・未読" : "未読"}</em>}
+                </button>)}
+            </section>
+            <section className="project-section project-mail-reader">
+              {selectedMail
+                ? <article>
+                  <small>{selectedMail.senderRole} · {selectedMail.sender} · {selectedMail.receivedAt}</small>
+                  <h3>{selectedMail.subject}</h3>
+                  <p>{selectedMail.body}</p>
+                  {scenario.projectDocuments.find((document) => document.id === selectedMail.relatedDocumentId) && <>
+                    <small>関連資料: {scenario.projectDocuments.find((document) => document.id === selectedMail.relatedDocumentId)?.title}</small>
+                    <button className="project-secondary-button" onClick={() => {
+                      const document = scenario.projectDocuments.find((item) => item.id === selectedMail.relatedDocumentId);
+                      if (document) openDocument(document);
+                      setTab("documents");
+                    }}>関連資料を開く</button>
+                  </>}
+                </article>
+                : <p className="project-empty">メールを選択して内容を確認してください。重要メールを読むと案件評価へ反映されます。</p>}
             </section>
           </div>
         </div>}

@@ -364,6 +364,7 @@ export function calculateAuditReport(
     investigationNotes: [],
     architectureEdges: [],
     readDocumentIds: [],
+    readMailIds: [],
     decisionEvidence: [],
     plannedDowntimeMinutes: scenario.project.downtimeLimitMinutes,
     maintenanceWindow: scenario.project.downtimeWindow,
@@ -518,6 +519,10 @@ function calculateProjectScores(
     + (project.cutoverDecision !== "pending" ? 10 : 0)
     + (eventNames.has("verify:task-run") ? 5 : 0)
     + (eventNames.has("verify:service-startup") ? 5 : 0);
+  const priorityMails = scenario.projectMails.filter((mail) => mail.importance === "high");
+  const coordinationScore = priorityMails.length === 0
+    ? 100
+    : Math.round(priorityMails.filter((mail) => project.readMailIds.includes(mail.id)).length / priorityMails.length * 100);
   const riskScore = scenario.decisionReviews.length === 0
     ? 100
     : Math.round((evidenceReviews ?? evaluateProjectEvidence(scenario, project))
@@ -527,6 +532,7 @@ function calculateProjectScores(
     { id: "research", label: "調査品質", score: researchScore },
     { id: "design", label: "設計品質", score: designScore },
     { id: "risk", label: "リスク管理・判断根拠", score: riskScore },
+    { id: "coordination", label: "関係者調整", score: coordinationScore },
     { id: "migration", label: "移行品質", score: Math.max(0, migrationRate - (dataSyncPending ? 20 : 0) - (databaseMigrationComplete ? 0 : 20)) },
     { id: "incident", label: "障害対応", score: incidentResponseScore },
     { id: "security", label: "セキュリティ", score: securityScore },
@@ -577,6 +583,16 @@ function getProjectFindings(
       id: "decision-evidence",
       title: `判断根拠が十分でない項目が${incompleteEvidenceReviews.length}件あります`,
       remediation: `${incompleteEvidenceReviews.slice(0, 3).map((review) => `${review.title}: ${review.feedback}`).join(" / ")}。案件デスクの「案件資料・判断根拠」で資料の該当箇所を引用し、判断理由を補ってください。`,
+    });
+  }
+  const unreadPriorityMails = scenario.projectMails.filter((mail) =>
+    mail.importance === "high" && !project.readMailIds.includes(mail.id),
+  );
+  if (unreadPriorityMails.length > 0) {
+    findings.push({
+      id: "unread-priority-mail",
+      title: `未確認の重要メールが${unreadPriorityMails.length}件あります`,
+      remediation: `案件デスクの「メール」で${unreadPriorityMails.slice(0, 2).map((mail) => `「${mail.subject}」`).join("、")}を読み、変更期限や同期条件を計画へ反映してください。`,
     });
   }
   const missingDependencies = scenario.project.dependencies.filter((expected) => !project.architectureEdges.some((actual) =>

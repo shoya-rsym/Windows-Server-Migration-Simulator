@@ -149,6 +149,38 @@
       ]
     }
   ],
+  "projectMails": [
+    {
+      "id": "network-ttl-warning",
+      "receivedAt": "2026-10-27 09:14",
+      "sender": "yoshida@network.example.local",
+      "senderRole": "ネットワーク担当",
+      "subject": "【要対応】DNS TTL短縮の申請期限について",
+      "body": "切替予定日の3日前までにTTLを86400秒から300秒へ短縮する必要があります。変更申請がまだ届いていません。切替日を確定する前に、変更作業と旧TTLキャッシュの満了見込みを確認してください。該当するネットワーク変更依頼のセクションを確認してください。",
+      "importance": "high",
+      "relatedDocumentId": "network-change-request"
+    },
+    {
+      "id": "dba-final-sync",
+      "receivedAt": "2026-10-27 10:02",
+      "sender": "sato@dba.example.local",
+      "senderRole": "DBA",
+      "subject": "DB移行方式と最終同期の確認",
+      "body": "Data PumpとRMANは継続同期ではありません。最終同期の開始条件、業務更新停止、データ世代の一致確認に必要な時間を計画へ含めてください。会議議事録の決定事項を参照してください。",
+      "importance": "high",
+      "relatedDocumentId": "migration-meeting-minutes"
+    },
+    {
+      "id": "customer-maintenance-window",
+      "receivedAt": "2026-10-27 11:35",
+      "sender": "tanaka@customer.example.local",
+      "senderRole": "顧客システム担当",
+      "subject": "切替作業中の業務停止時間について",
+      "body": "利用部門への案内準備のため、作業枠と停止見込みを共有してください。許容時間を超える可能性がある場合は、切替日程を再調整したいです。運用手順書の停止制約を確認し、見積に含める作業も知らせてください。",
+      "importance": "normal",
+      "relatedDocumentId": "operations-manual"
+    }
+  ],
   "assets": {
     "servers": [
       { "id": "ap-old", "hostname": "APSV01", "role": "application", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },

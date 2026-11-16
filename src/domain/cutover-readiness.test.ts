@@ -13,6 +13,7 @@ function createProject(): ProjectWorkspace {
     investigationNotes: [],
     architectureEdges: [],
     readDocumentIds: [],
+    readMailIds: [],
     decisionEvidence: [],
     plannedDowntimeMinutes: scenario.project.downtimeLimitMinutes,
     maintenanceWindow: scenario.project.downtimeWindow,

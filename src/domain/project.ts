@@ -5,6 +5,7 @@ export function createInitialProjectWorkspace(brief: ProjectBrief): ProjectWorks
     investigationNotes: [],
     architectureEdges: [],
     readDocumentIds: [],
+    readMailIds: [],
     decisionEvidence: [],
     plannedDowntimeMinutes: brief.downtimeLimitMinutes,
     maintenanceWindow: brief.downtimeWindow,

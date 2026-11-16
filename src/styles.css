@@ -328,7 +328,7 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .cutover-readiness li.ready > span { color: #46936a; }.cutover-readiness li.pending > span { color: #c47762; }
 .cutover-readiness li > div { display: grid; gap: 3px; }.cutover-readiness li strong { color: #52647a; font-size: 10.5px; }
 .cutover-readiness li small { color: #927d6e; font-size: 9.5px; line-height: 1.5; }
-.report-quality-grid { grid-template-columns: repeat(7,minmax(0,1fr)); }
+.report-quality-grid { grid-template-columns: repeat(8,minmax(0,1fr)); }
 .report-evidence { margin: 0 16px 11px; padding: 12px; border: 1px solid #dce5ef; border-radius: 6px; background: white; }
 .report-evidence h3 { margin: 0 0 8px; color: #52647a; font-size: 12.5px; }
 .report-evidence article { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid #edf0f4; }
@@ -353,7 +353,27 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .project-document-reader section strong { color: #596e89; font-size: 9.5px; }
 .project-document-reader section p { margin: 4px 0 0; color: #74849a; font-size: 9.3px; line-height: 1.6; white-space: pre-wrap; }
 .project-evidence-prompt { margin: 0 !important; padding: 8px; color: #697d97 !important; border-radius: 4px; background: #f5f8fc; }
+.project-mail-toolbar { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; padding: 9px 11px; color: #587391; border: 1px solid #dfe7ef; border-radius: 5px; background: #f7f9fc; }
+.project-mail-toolbar strong { font-size: 10.5px; }.project-mail-toolbar span { color: #8391a2; font-size: 9px; }
+.project-mail-layout { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); gap: 10px; align-items: start; }
+.project-mail-layout .project-section { margin: 0; }
+.project-mail-inbox { display: grid; gap: 5px; }
+.project-mail-inbox h3 { margin-bottom: 3px; }
+.project-mail-inbox > button { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; padding: 8px; text-align: left; color: #5b6d84; border: 1px solid #e4eaf1; border-radius: 4px; background: #fbfcfe; }
+.project-mail-inbox > button.active { border-color: #9dbbe0; background: #f2f7fd; }
+.project-mail-inbox > button.priority { border-left: 3px solid #d28b68; }
+.project-mail-inbox > button span { display: grid; gap: 4px; min-width: 0; }
+.project-mail-inbox > button strong { font-size: 9px; }.project-mail-inbox > button small { color: #8391a2; font-size: 8.5px; line-height: 1.4; }
+.project-mail-inbox > button em { flex: 0 0 auto; color: #b46c4c; font-size: 8px; font-style: normal; }
+.project-mail-reader { min-height: 160px; }
+.project-mail-reader > article { display: grid; gap: 8px; }
+.project-mail-reader article > small { color: #8593a5; font-size: 8.8px; line-height: 1.5; }
+.project-mail-reader article h3 { margin: 0; padding-bottom: 8px; border-bottom: 1px solid #edf0f4; }
+.project-mail-reader article p { margin: 0; color: #63758c; font-size: 10px; line-height: 1.7; white-space: pre-wrap; }
+.project-mail-reader article .project-secondary-button { justify-self: start; }
 @media (max-width: 620px) {
   .report-quality-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .report-evidence { margin-left: 9px; margin-right: 9px; }
+  .project-mail-layout { grid-template-columns: 1fr; }
+  .project-mail-toolbar { align-items: flex-start; }
 }

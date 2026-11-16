@@ -49,12 +49,21 @@ describe("scenario integrity validation", () => {
     const {
       projectDocuments: _projectDocuments,
       decisionReviews: _decisionReviews,
+      projectMails: _projectMails,
       ...legacyScenario
     } = structuredClone(scenarioDefinition);
 
     expect(loadScenario(legacyScenario)).toMatchObject({
       projectDocuments: [],
       decisionReviews: [],
+      projectMails: [],
     });
+  });
+
+  it("rejects emails that reference missing project documents", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    invalidScenario.projectMails[0].relatedDocumentId = "missing-document";
+
+    expect(() => loadScenario(invalidScenario)).toThrow("案件メールに関連する資料がありません");
   });
 });

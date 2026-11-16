@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import scenarioDefinition from "../data/scenarios/windows-server-2016-to-2019.json";
 import { createInitialProjectWorkspace } from "./project";
-import { evaluateProjectEvidence } from "./progress";
+import { calculateAuditReport, evaluateProjectEvidence } from "./progress";
 import { loadScenario } from "./scenario";
 
 const scenario = loadScenario(scenarioDefinition);
@@ -65,5 +65,22 @@ describe("project document evidence review", () => {
     const results = evaluateProjectEvidence(scenario, createInitialProjectWorkspace(scenario.project));
     expect(results).toHaveLength(scenario.decisionReviews.length);
     expect(results.every((item) => item.score === 0)).toBe(true);
+  });
+
+  it("reports unread priority email and rewards reviewing it", () => {
+    const project = createInitialProjectWorkspace(scenario.project);
+    const initialReport = calculateAuditReport(scenario, [], 0, 0, 1, project);
+    const priorityMailIds = scenario.projectMails
+      .filter((mail) => mail.importance === "high")
+      .map((mail) => mail.id);
+    const reviewedReport = calculateAuditReport(scenario, [], 0, 0, 1, {
+      ...project,
+      readMailIds: priorityMailIds,
+    });
+
+    expect(initialReport.projectScores.find((item) => item.id === "coordination")?.score).toBe(0);
+    expect(initialReport.projectFindings.some((finding) => finding.id === "unread-priority-mail")).toBe(true);
+    expect(reviewedReport.projectScores.find((item) => item.id === "coordination")?.score).toBe(100);
+    expect(reviewedReport.projectFindings.some((finding) => finding.id === "unread-priority-mail")).toBe(false);
   });
 });

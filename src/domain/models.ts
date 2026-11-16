@@ -66,6 +66,17 @@ export interface ProjectDecisionReview {
   }>;
 }
 
+export interface ProjectMailMessage {
+  id: string;
+  receivedAt: string;
+  sender: string;
+  senderRole: string;
+  subject: string;
+  body: string;
+  importance: "normal" | "high";
+  relatedDocumentId: string;
+}
+
 export interface ProjectDecisionEvidence {
   id: string;
   decisionId: string;
@@ -90,6 +101,7 @@ export interface ProjectWorkspace {
   investigationNotes: InvestigationNote[];
   architectureEdges: Array<{ id: string; from: string; to: string }>;
   readDocumentIds: string[];
+  readMailIds: string[];
   decisionEvidence: ProjectDecisionEvidence[];
   plannedDowntimeMinutes: number;
   maintenanceWindow: string;
@@ -233,6 +245,7 @@ export interface Scenario {
   project: ProjectBrief;
   projectDocuments: ProjectDocument[];
   decisionReviews: ProjectDecisionReview[];
+  projectMails: ProjectMailMessage[];
   assets: {
     servers: Server[];
     vms: VM[];
