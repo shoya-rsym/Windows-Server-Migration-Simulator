@@ -67,6 +67,34 @@ describe("project effort estimate review", () => {
     expect(result.score).toBe(50);
   });
 
+  it("allows technical discovery before the estimate but requires it before migration execution", () => {
+    const phasedScenario = {
+      ...scenario,
+      projectEffortPackages: [
+        {
+          id: "discovery",
+          title: "調査",
+          requiredEvents: ["inspect:os:source"],
+          actualPersonHours: 10,
+        },
+        {
+          id: "execution",
+          title: "移行先構築",
+          requiredEvents: ["install:middleware:ap-new:Java 8"],
+          actualPersonHours: 10,
+          startsExecution: true,
+        },
+      ],
+    };
+    const events: AuditEvent[] = [
+      { name: "inspect:os:source", at: 10 },
+      { name: "install:middleware:ap-new:Java 8", at: 30 },
+    ];
+
+    expect(evaluateEffortEstimate(phasedScenario, events, events, projectWithEstimate(20)).recordedBeforeWork).toBe(true);
+    expect(evaluateEffortEstimate(phasedScenario, events, events, projectWithEstimate(31)).recordedBeforeWork).toBe(false);
+  });
+
   it("keeps scenarios without effort packages compatible", () => {
     const result = evaluateEffortEstimate(
       { ...scenario, projectEffortPackages: [] },

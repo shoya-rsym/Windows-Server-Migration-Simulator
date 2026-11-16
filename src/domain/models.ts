@@ -97,6 +97,7 @@ export interface ProjectEffortPackage {
   title: string;
   requiredEvents: string[];
   actualPersonHours: number;
+  startsExecution?: boolean;
 }
 
 export interface ProjectMeeting {

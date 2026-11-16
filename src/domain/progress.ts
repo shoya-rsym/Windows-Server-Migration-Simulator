@@ -612,9 +612,11 @@ export function evaluateEffortEstimate(
     && estimateDocument.sections.some((section) => section.id === project.estimateSectionId),
   );
   const rationaleSpecific = project.estimateRationale.trim().length >= 40;
-  const estimateEvents = new Set(scenario.projectEffortPackages.flatMap((item) => item.requiredEvents));
+  const executionPackages = scenario.projectEffortPackages.filter((item) => item.startsExecution);
+  const timingPackages = executionPackages.length > 0 ? executionPackages : scenario.projectEffortPackages;
+  const executionEvents = new Set(timingPackages.flatMap((item) => item.requiredEvents));
   const firstWorkAt = actualEvents
-    .filter((event) => estimateEvents.has(event.name))
+    .filter((event) => executionEvents.has(event.name))
     .reduce<number | null>((earliest, event) => earliest === null ? event.at : Math.min(earliest, event.at), null);
   const recordedBeforeWork = firstWorkAt === null
     || (project.estimateConfirmedAt !== null && project.estimateConfirmedAt <= firstWorkAt);
@@ -829,14 +831,14 @@ function getProjectFindings(
     && (project.estimateConfirmedAt === null || effortEstimate.estimatedPersonHours === null)) {
     findings.push({
       id: "effort-estimate-missing",
-      title: "案件開始時の工数見積が記録されていません",
-      remediation: "作業を始める前にサーバー台数・利用者数・資料を確認し、総人時と見積根拠を案件デスクの「工数見積」に記録してください。",
+      title: "移行実作業開始前の工数見積が記録されていません",
+      remediation: "案件条件・技術調査・依存関係を整理し、移行先の構築やデータ移行を始める前に総人時と見積根拠を記録してください。",
     });
   } else if (!effortEstimate.recordedBeforeWork) {
     findings.push({
       id: "effort-estimate-late",
-      title: "工数見積が作業開始後に記録されています",
-      remediation: "実務では着手前の見積と実績を比較するため、次回は設計・構築作業の開始前に前提と見積を確定してください。",
+      title: "工数見積が移行実作業開始後に記録されています",
+      remediation: "実務では技術調査を根拠に見積もり、移行先の構築やデータ移行などの実作業を始める前に前提と見積を確定してください。",
     });
   } else if (effortEstimate.variancePercent !== null && effortEstimate.variancePercent > 20) {
     findings.push({

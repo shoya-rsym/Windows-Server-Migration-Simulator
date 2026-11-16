@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,6 +12,17 @@ import {
 import type { StoryModeDefinition, TutorialStep } from "../domain/models";
 
 type FocusRect = { top: number; left: number; width: number; height: number };
+type QuizProgress = {
+  selectedChoiceId: string | null;
+  outcome: "correct" | "skipped" | null;
+  feedback: string;
+};
+
+const EMPTY_QUIZ_PROGRESS: QuizProgress = {
+  selectedChoiceId: null,
+  outcome: null,
+  feedback: "",
+};
 
 export function StoryModePlayer({
   story,
@@ -30,13 +41,15 @@ export function StoryModePlayer({
 }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [visibleActionCount, setVisibleActionCount] = useState(0);
-  const [quizOutcome, setQuizOutcome] = useState<"correct" | "skipped" | null>(null);
-  const [quizFeedback, setQuizFeedback] = useState("");
+  const [quizProgressByStep, setQuizProgressByStep] = useState<Record<string, QuizProgress>>({});
+  const [stepNumberInput, setStepNumberInput] = useState("1");
   const [failureVisible, setFailureVisible] = useState(false);
   const [failureOccurred, setFailureOccurred] = useState(false);
   const [autoPlay, setAutoPlay] = useState(false);
   const [completedAt, setCompletedAt] = useState<number | null>(null);
   const [focusRect, setFocusRect] = useState<FocusRect | null>(null);
+  const [cardPosition, setCardPosition] = useState<CSSProperties | null>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
   const startedAt = useRef(Date.now());
   const onStepChangeRef = useRef(onStepChange);
   onStepChangeRef.current = onStepChange;
@@ -44,58 +57,166 @@ export function StoryModePlayer({
 
   if (!step) throw new Error("観察モードのチュートリアル手順がありません。");
 
+  const quizProgress = quizProgressByStep[step.id] ?? EMPTY_QUIZ_PROGRESS;
   const enhancement = story.steps.find((item) => item.tutorialStepId === step.id);
   const actions = enhancement?.autoActions ?? [];
   const quiz = enhancement?.quiz;
   const recommendedChoice = quiz?.choices.find((choice) => choice.correct);
   const playbackComplete = visibleActionCount >= actions.length;
-  const rightSpace = focusRect ? window.innerWidth - focusRect.left - focusRect.width - 14 : 0;
-  const leftSpace = focusRect ? focusRect.left - 14 : 0;
-  const cardSide = rightSpace >= leftSpace ? "side-right" : "side-left";
-  const cardMaxHeight = Math.min(window.innerHeight * 0.54, 560);
-  const cardTop = focusRect
-    ? Math.max(56, Math.min(focusRect.top, window.innerHeight - cardMaxHeight - 12))
-    : undefined;
-  const cardPositionStyle = cardTop === undefined || completedAt !== null || window.innerWidth <= 800
-    ? undefined
-    : { top: cardTop, bottom: "auto" };
+  const cardPositionStyle = completedAt === null ? cardPosition ?? undefined : undefined;
 
   useEffect(() => {
     onStepChangeRef.current(step);
   }, [step.id]);
 
   useEffect(() => {
-    const target = document.querySelector<HTMLElement>(`[data-observation-target="${focusTargetId}"]`);
-    if (!target) {
-      setFocusRect(null);
-      return;
-    }
-
+    let target: HTMLElement | null = null;
+    let preferredTargetFound = false;
+    let measureFrame = 0;
+    let settleTimer = 0;
     const measure = () => {
+      if (!target) {
+        setFocusRect(null);
+        return;
+      }
       const rect = target.getBoundingClientRect();
       const padding = 7;
-      const left = Math.max(4, rect.left - padding);
-      const top = Math.max(4, rect.top - padding);
-      setFocusRect({
+      const left = Math.max(4, Math.min(window.innerWidth - 8, rect.left - padding));
+      const top = Math.max(4, Math.min(window.innerHeight - 8, rect.top - padding));
+      const nextRect = {
         left,
         top,
         width: Math.min(window.innerWidth - left - 4, rect.width + padding * 2),
         height: Math.min(window.innerHeight - top - 4, rect.height + padding * 2),
-      });
+      };
+      setFocusRect((current) => current
+        && current.left === nextRect.left
+        && current.top === nextRect.top
+        && current.width === nextRect.width
+        && current.height === nextRect.height
+        ? current
+        : nextRect);
     };
 
-    target.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-    const frame = window.requestAnimationFrame(measure);
-    const settleTimer = window.setTimeout(measure, 220);
+    const revealTarget = () => {
+      const compactViewport = window.innerWidth <= 800;
+      target?.scrollIntoView({ block: compactViewport ? "start" : "center", inline: "nearest", behavior: compactViewport ? "auto" : "smooth" });
+      window.cancelAnimationFrame(measureFrame);
+      window.clearTimeout(settleTimer);
+      measureFrame = window.requestAnimationFrame(() => {
+        if (compactViewport && target) {
+          const topOffset = target.getBoundingClientRect().top - 56;
+          if (Math.abs(topOffset) > 4) window.scrollBy({ top: topOffset, behavior: "auto" });
+        }
+        measure();
+      });
+      settleTimer = window.setTimeout(measure, 220);
+    };
+    const findTarget = () => {
+      const preferredTarget = document.querySelector<HTMLElement>(`[data-observation-target="${focusTargetId}"]`);
+      if (preferredTarget) {
+        if (preferredTarget !== target || !preferredTargetFound) {
+          target = preferredTarget;
+          preferredTargetFound = true;
+          observer.disconnect();
+          revealTarget();
+        } else {
+          measure();
+        }
+        return;
+      }
+
+      preferredTargetFound = false;
+      const fallbackTarget = document.querySelector<HTMLElement>('[data-observation-target="server-grid"]');
+      if (fallbackTarget && fallbackTarget !== target) {
+        target = fallbackTarget;
+        measure();
+      } else if (target) {
+        measure();
+      } else {
+        setFocusRect(null);
+      }
+    };
+    const observer = new MutationObserver(findTarget);
+    observer.observe(document.body, { childList: true, subtree: true });
+    findTarget();
     window.addEventListener("scroll", measure, true);
     window.addEventListener("resize", measure);
     return () => {
-      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.cancelAnimationFrame(measureFrame);
       window.clearTimeout(settleTimer);
       window.removeEventListener("scroll", measure, true);
       window.removeEventListener("resize", measure);
     };
   }, [focusTargetId, step.id]);
+
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card || !focusRect || completedAt !== null) {
+      setCardPosition(null);
+      return;
+    }
+
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const rightSpace = viewportWidth - focusRect.left - focusRect.width - 16;
+    const leftSpace = focusRect.left - 16;
+    const sideSpace = Math.max(rightSpace, leftSpace);
+    const sideWidth = Math.min(760, sideSpace - 24);
+    const useSidePosition = viewportWidth > 900 && sideWidth >= 420;
+    const below = focusRect.top + focusRect.height + 12;
+    const belowSpace = viewportHeight - below - 16;
+    const useBelowPosition = viewportWidth <= 800 && belowSpace >= 180;
+    const width = useSidePosition ? sideWidth : Math.max(240, Math.min(760, viewportWidth - 32));
+    const maxHeight = useBelowPosition
+      ? belowSpace
+      : viewportWidth <= 800
+        ? Math.min(viewportHeight - 80, Math.max(240, viewportHeight * 0.5))
+        : Math.max(180, viewportHeight - 80);
+
+    card.style.width = `${width}px`;
+    card.style.maxHeight = `${maxHeight}px`;
+    const height = card.getBoundingClientRect().height;
+    const left = useSidePosition
+      ? (rightSpace >= leftSpace ? focusRect.left + focusRect.width + 12 : focusRect.left - width - 12)
+      : (viewportWidth - width) / 2;
+    let top: number;
+    if (useSidePosition) {
+      top = Math.max(56, Math.min(focusRect.top, viewportHeight - height - 16));
+    } else if (useBelowPosition) {
+      top = below;
+    } else {
+      const above = focusRect.top - height - 12;
+      if (below + height <= viewportHeight - 16) top = below;
+      else if (above >= 56) top = above;
+      else top = Math.max(56, Math.min(focusRect.top, viewportHeight - height - 16));
+    }
+
+    setCardPosition({
+      left: Math.max(16, Math.min(left, viewportWidth - width - 16)),
+      top,
+      width,
+      maxHeight,
+      right: "auto",
+      bottom: "auto",
+      transform: "none",
+    });
+  }, [
+    completedAt,
+    failureVisible,
+    focusRect,
+    playbackComplete,
+    quizProgress.feedback,
+    quizProgress.outcome,
+    quizProgress.selectedChoiceId,
+    step.id,
+    visibleActionCount,
+  ]);
+
+  useEffect(() => {
+    setStepNumberInput(String(stepIndex + 1));
+  }, [stepIndex]);
 
   useEffect(() => {
     setVisibleActionCount(0);
@@ -115,7 +236,7 @@ export function StoryModePlayer({
       || completedAt !== null
       || failureVisible
       || !playbackComplete
-      || (quiz && !quizOutcome)
+      || (quiz && !quizProgress.outcome)
     ) return;
 
     const timer = window.setTimeout(() => {
@@ -123,50 +244,75 @@ export function StoryModePlayer({
         setCompletedAt(Date.now());
       } else {
         setStepIndex((current) => current + 1);
-        setQuizOutcome(null);
-        setQuizFeedback("");
       }
     }, 2500);
     return () => window.clearTimeout(timer);
-  }, [autoPlay, completedAt, failureVisible, playbackComplete, quiz, quizOutcome, stepIndex, tutorialSteps.length]);
+  }, [autoPlay, completedAt, failureVisible, playbackComplete, quiz, quizProgress.outcome, stepIndex, tutorialSteps.length]);
+
+  const updateQuizProgress = (updates: Partial<QuizProgress>) => {
+    setQuizProgressByStep((current) => ({
+      ...current,
+      [step.id]: { ...(current[step.id] ?? EMPTY_QUIZ_PROGRESS), ...updates },
+    }));
+  };
+
+  const goToStep = (index: number) => {
+    setAutoPlay(false);
+    setFailureVisible(false);
+    setCompletedAt(null);
+    setStepIndex(index);
+  };
 
   const handleChoice = (choiceId: string) => {
     const choice = quiz?.choices.find((item) => item.id === choiceId);
-    if (!quiz || !choice || !playbackComplete) return;
+    if (!quiz || !choice || !playbackComplete || quizProgress.outcome !== null) return;
     if (choice.correct) {
-      setQuizOutcome("correct");
-      setQuizFeedback(quiz.answerExplanation);
+      updateQuizProgress({
+        selectedChoiceId: choiceId,
+        outcome: "correct",
+        feedback: quiz.answerExplanation,
+      });
     } else if (enhancement?.failureBranch) {
+      updateQuizProgress({ selectedChoiceId: choiceId, feedback: "" });
       setFailureOccurred(true);
       setFailureVisible(true);
     } else {
-      setQuizFeedback(choice.feedback ?? "推奨回答ではありません。選択肢を見直して、もう一度考えてみましょう。");
+      updateQuizProgress({
+        selectedChoiceId: choiceId,
+        feedback: choice.feedback ?? "推奨回答ではありません。選択肢を見直して、もう一度考えてみましょう。",
+      });
     }
   };
 
   const skipQuiz = () => {
-    if (!quiz || !recommendedChoice || !playbackComplete) return;
-    setQuizOutcome("skipped");
-    setQuizFeedback(`今回はスキップしました。推奨回答: ${recommendedChoice.label}。${quiz.answerExplanation}`);
+    if (!quiz || !recommendedChoice || !playbackComplete || quizProgress.outcome !== null) return;
+    updateQuizProgress({
+      outcome: "skipped",
+      feedback: `今回はスキップしました。推奨回答: ${recommendedChoice.label}。${quiz.answerExplanation}`,
+    });
   };
 
   const advance = () => {
-    if (!playbackComplete || (quiz && !quizOutcome)) return;
+    if (!playbackComplete || (quiz && !quizProgress.outcome)) return;
     if (stepIndex === tutorialSteps.length - 1) {
       setCompletedAt(Date.now());
       return;
     }
     setStepIndex((current) => current + 1);
-    setQuizOutcome(null);
-    setQuizFeedback("");
+  };
+
+  const jumpToStep = () => {
+    const requestedStep = Number(stepNumberInput);
+    if (!Number.isInteger(requestedStep) || requestedStep < 1 || requestedStep > tutorialSteps.length) return;
+    goToStep(requestedStep - 1);
   };
 
   const restart = () => {
     startedAt.current = Date.now();
     setStepIndex(0);
     setVisibleActionCount(0);
-    setQuizOutcome(null);
-    setQuizFeedback("");
+    setQuizProgressByStep({});
+    setStepNumberInput("1");
     setFailureVisible(false);
     setFailureOccurred(false);
     setCompletedAt(null);
@@ -181,7 +327,7 @@ export function StoryModePlayer({
   if (failureVisible && enhancement?.failureBranch) {
     const failure = enhancement.failureBranch;
     overlayContent = (
-      <section className={`observation-card ${cardSide} observation-failure`} style={cardPositionStyle} aria-live="polite">
+      <section ref={cardRef} className="observation-card observation-failure" style={cardPositionStyle} aria-live="polite">
         <span className="observation-eyebrow">判断の結果を見てみましょう</span>
         <h1>{failure.title}</h1>
         <p className="observation-failure-impact">{failure.impact}</p>
@@ -201,8 +347,7 @@ export function StoryModePlayer({
           className="observation-primary-button"
           onClick={() => {
             setFailureVisible(false);
-            setQuizOutcome(null);
-            setQuizFeedback(failure.recovery);
+            updateQuizProgress({ feedback: failure.recovery });
           }}
         >
           理解した・判断地点へ戻る
@@ -212,7 +357,7 @@ export function StoryModePlayer({
   } else if (completedAt !== null) {
     const elapsedMinutes = Math.max(1, Math.ceil((completedAt - startedAt.current) / 60_000));
     overlayContent = (
-      <section className={`observation-card ${cardSide} observation-complete`}>
+      <section className="observation-card observation-complete">
         <div className="observation-complete-icon"><CheckCircle2 size={26} /></div>
         <span className="observation-eyebrow">チュートリアルの流れを見終えました</span>
         <h1>今回学んだ内容</h1>
@@ -226,6 +371,7 @@ export function StoryModePlayer({
           <span>失敗シナリオ <strong>{failureOccurred ? "体験しました" : "未体験"}</strong></span>
         </div>
         <div className="observation-actions">
+          <button className="observation-quiet-button" onClick={() => goToStep(0)}><ArrowLeft size={15} />手順を見返す</button>
           <button className="observation-quiet-button" onClick={restart}><RotateCcw size={15} />もう一度見る</button>
           <button className="observation-primary-button" onClick={onStartTutorial}><Play size={15} />チュートリアルを始める</button>
         </div>
@@ -233,7 +379,7 @@ export function StoryModePlayer({
     );
   } else {
     overlayContent = (
-      <section className={`observation-card ${cardSide}`} style={cardPositionStyle} aria-live="polite">
+      <section ref={cardRef} className="observation-card" style={cardPositionStyle} aria-live="polite">
         <div className="observation-step-heading">
           <span className="observation-eyebrow">チュートリアルを観察 · 手順 {stepIndex + 1} / {tutorialSteps.length}</span>
           <div className="observation-progress"><span style={{ width: `${((stepIndex + 1) / tutorialSteps.length) * 100}%` }} /></div>
@@ -273,13 +419,20 @@ export function StoryModePlayer({
             <h2>{quiz.question}</h2>
             <div className="observation-quiz-choices">
               {quiz.choices.map((choice) => (
-                <button key={choice.id} disabled={!playbackComplete || quizOutcome !== null} onClick={() => handleChoice(choice.id)}>
+                <button
+                  key={choice.id}
+                  type="button"
+                  className={quizProgress.selectedChoiceId === choice.id ? "is-selected" : undefined}
+                  aria-pressed={quizProgress.selectedChoiceId === choice.id}
+                  disabled={!playbackComplete || quizProgress.outcome !== null}
+                  onClick={() => handleChoice(choice.id)}
+                >
                   {choice.label}
                 </button>
               ))}
             </div>
-            {quizFeedback && <p className="observation-quiz-feedback" role="status">{quizFeedback}</p>}
-            {quizOutcome === null && (
+            {quizProgress.feedback && <p className="observation-quiz-feedback" role="status">{quizProgress.feedback}</p>}
+            {quizProgress.outcome === null && (
               <button className="observation-skip-button" disabled={!playbackComplete} onClick={skipQuiz}>
                 <SkipForward size={14} />スキップして推奨回答を見る
               </button>
@@ -287,11 +440,42 @@ export function StoryModePlayer({
           </section>
         )}
         <div className="observation-footer">
-          <span>{quizOutcome === "correct" ? "判断できました" : quizOutcome === "skipped" ? "推奨回答を確認しました" : "ハイライトされた画面を確認してください"}</span>
-          <button className="observation-primary-button" disabled={!playbackComplete || (quiz !== undefined && quizOutcome === null)} onClick={advance}>
-            {stepIndex === tutorialSteps.length - 1 ? "学習内容を振り返る" : "次へ"}
-            <ArrowRight size={15} />
-          </button>
+          <div className="observation-step-controls">
+            <button type="button" className="observation-quiet-button" disabled={stepIndex === 0} onClick={() => goToStep(stepIndex - 1)}>
+              <ArrowLeft size={14} />前へ
+            </button>
+            <label>
+              手順
+              <input
+                type="number"
+                min={1}
+                max={tutorialSteps.length}
+                step={1}
+                aria-label="移動先の手順番号"
+                value={stepNumberInput}
+                onChange={(event) => setStepNumberInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") jumpToStep();
+                }}
+              />
+              / {tutorialSteps.length}
+            </label>
+            <button
+              type="button"
+              className="observation-quiet-button"
+              disabled={!Number.isInteger(Number(stepNumberInput)) || Number(stepNumberInput) < 1 || Number(stepNumberInput) > tutorialSteps.length}
+              onClick={jumpToStep}
+            >
+              移動
+            </button>
+          </div>
+          <div className="observation-footer-next">
+            <span>{quizProgress.outcome === "correct" ? "判断できました" : quizProgress.outcome === "skipped" ? "推奨回答を確認しました" : "ハイライトされた画面を確認してください"}</span>
+            <button className="observation-primary-button" disabled={!playbackComplete || (quiz !== undefined && quizProgress.outcome === null)} onClick={advance}>
+              {stepIndex === tutorialSteps.length - 1 ? "学習内容を振り返る" : "次へ"}
+              <ArrowRight size={15} />
+            </button>
+          </div>
         </div>
       </section>
     );

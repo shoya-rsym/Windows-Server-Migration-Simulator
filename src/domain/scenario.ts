@@ -157,6 +157,7 @@ const scenarioSchema = z.object({
     title: z.string().min(1),
     requiredEvents: z.array(z.string().min(1)).min(1),
     actualPersonHours: z.number().positive(),
+    startsExecution: z.boolean().optional(),
   })).default([]),
   projectMeetings: z.array(z.object({
     id: z.string().min(1),

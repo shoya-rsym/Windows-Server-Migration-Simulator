@@ -2109,7 +2109,7 @@ function ProjectDeskPanel({
               <article><small>DBサーバー</small><strong>{scenario.assets.servers.filter((server) => server.role === "database").length} 台</strong></article>
               <article><small>許容停止</small><strong>{scenario.project.downtimeLimitMinutes} 分</strong></article>
             </div>
-            <p className="project-plan-note">技術作業だけでなく、調査・資料確認・関係者調整・テスト・切替・障害対応までを含む総人時を見積もります。見積前に案件資料を確認してください。</p>
+            <p className="project-plan-note">資料・関係者条件・技術調査を根拠に、調査・調整・テスト・切替・障害対応まで含む総人時を見積もります。移行先の構築やデータ移行を始める前に確定してください。</p>
             <div className="project-effort-live">
               <span>実施済み作業から算出したモデル実績</span>
               <strong>{effortEstimate.actualPersonHours.toFixed(1)} 人時</strong>
@@ -2124,7 +2124,7 @@ function ProjectDeskPanel({
                 <div className="project-record-list"><article>
                   <strong>見積: {project.estimatedPersonHours?.toFixed(1)} 人時</strong>
                   <p>根拠資料: {scenario.projectDocuments.find((document) => document.id === project.estimateDocumentId)?.title ?? "資料なし"} / {scenario.projectDocuments.find((document) => document.id === project.estimateDocumentId)?.sections.find((section) => section.id === project.estimateSectionId)?.title ?? "箇所なし"}<br />{project.estimateRationale}</p>
-                  {!effortEstimate.recordedBeforeWork && <p className="project-risk">作業開始後の見積のため、正確性評価は制限されています。</p>}
+                  {!effortEstimate.recordedBeforeWork && <p className="project-risk">移行実作業開始後の見積のため、正確性評価は制限されています。</p>}
                 </article></div>
               </>
               : <form className="project-form" onSubmit={confirmEffortEstimate}>

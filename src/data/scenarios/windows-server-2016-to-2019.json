@@ -516,7 +516,8 @@
       "id": "target-platform-build",
       "title": "移行先基盤・ミドルウェア構築",
       "requiredEvents": ["install:middleware:ap-new:Java 8", "install:middleware:ap-new:Resin 4.0", "install:middleware:db-new:Oracle 19c", "start:oracle-service"],
-      "actualPersonHours": 18
+      "actualPersonHours": 18,
+      "startsExecution": true
     },
     {
       "id": "database-migration",
@@ -676,9 +677,9 @@
     { "id": "review-project-mail", "instruction": "案件デスクの「メール」で、特に重要メールを読みます。TTL短縮申請や作業枠について未完了の依頼があれば、担当者・期限・完了確認を切替計画へ反映してください。", "requiredEvents": ["project:mail-reviewed"], "explanation": "依頼を送信したことと変更が完了したことは別です。メールの未完了事項を確認し、切替条件や担当者調整へ反映します。" },
     { "id": "review-project-teams", "instruction": "案件デスクの「Teams」でNW担当やDBAの会話を確認し、未完了の通信許可や最終同期について担当者・期限をそろえる返信を選んでください。", "requiredEvents": ["project:teams-aligned"], "explanation": "担当間の認識差や保留中の作業を表面化し、完了条件と検証方法を合意してから進めます。" },
     { "id": "review-project-meeting", "instruction": "案件デスクの「会議・議事録」で移行判定会議の議題を確認し、合意内容に沿って判断を選び、議事録を確定してください。計画の切戻し条件とも照合します。", "requiredEvents": ["project:meeting-recorded"], "explanation": "会議の決定を記録し、切戻し期限や最終同期の条件が作業計画と矛盾していないか確認します。" },
-    { "id": "review-project-effort", "instruction": "案件デスクの「工数見積」で、調査・調整・リハーサル・試験・切替・切戻し準備を含む総工数を、確認済み資料の根拠とともに見積もってください。", "requiredEvents": ["project:effort-estimated"], "explanation": "コマンド操作だけでなく、関係者調整やリハーサル、検証、切戻し準備を含めて見積もり、根拠資料と前提を残します。" },
     { "id": "record-investigation-notes", "instruction": "案件デスクの「調査・構成」で、調査したAP・DB・ネットワークについて、タイトルと根拠を含むノートを3件以上記録してください。これが最終評価の調査品質に反映されます。", "requiredEvents": ["tutorial:investigation-notes-ready"], "explanation": "調査コマンドを実行するだけでなく、ホスト名・OS・ミドルウェア・接続先などの根拠を案件記録に残すと、後続の設計や切替判断を追跡できます。" },
     { "id": "map-architecture", "instruction": "案件デスクの「調査・構成」にある「接続関係の調べ方」を参照してください。確認した資料やコマンドを根拠に、利用者→AD認証→AP、DNS→AP、AP→Oracle DB、定期バッチ→Oracle DBの接続を登録します。AD画面やバッチスクリプトなどMVPで確認できない項目は、案件要件を根拠に記録し、実案件では担当者へ確認します。", "requiredEvents": ["tutorial:architecture-ready"], "explanation": "構成図は推測だけで描かず、DNSレコード、JDBC/resin.conf、タスク設定、案件要件など確認元を明記します。MVPにないAD管理画面やバッチスクリプトは、未確認であることも記録してください。" },
+    { "id": "review-project-effort", "instruction": "案件デスクの「工数見積」で、資料・関係者条件・技術調査・構成図を整理した根拠から、調査・調整・リハーサル・試験・切替・切戻し準備を含む総工数を見積もってください。移行先構築やDB移行などの実作業を始める前に確定します。", "requiredEvents": ["project:effort-estimated"], "explanation": "実務では最初に概算を置くこともありますが、この学習では調査結果を根拠にした計画見積を扱います。調査や資料整理は見積の前提であり、移行先の構築・データ移行が始まる前に総工数を確定します。" },
     { "id": "prepare-project-plan", "instruction": "ヘッダーの「案件デスク」を開き、DB移行方式を選択し、許容停止時間内の作業時間、TTL短縮計画 (3日前以上)、利用者周知 (1日前以上)、具体的な切戻し条件と手順を記入してください。", "requiredEvents": ["tutorial:project-plan-ready"], "explanation": "移行作業に入る前に、停止時間・DNSキャッシュ・利用者影響・切戻しを計画します。Data Pump、RMAN、Data Guardで停止時間と運用手順が変わります。" },
     { "id": "send-user-notice", "instruction": "案件デスクで周知の件名と本文を確認し、停止時間・対象業務・問い合わせ先を記載して「周知を送信した記録を残す」を実行してください。周知時期が切替前日より早いことも確認します。", "requiredEvents": ["project:notice-sent"], "explanation": "周知を記録するだけでなく、利用者が停止時間と問い合わせ先を把握できる内容にします。" },
     { "id": "install-target-ap", "instruction": "APSV02 のソフトウェア構成を開き、互換性を確認した Java 8 を先に、その後 Resin 4.0 をインストールしてください。", "requiredEvents": ["install:middleware:ap-new:Java 8", "install:middleware:ap-new:Resin 4.0"], "explanation": "ResinはJava上で動くため、前提ソフトウェアを順番に導入します。今回のシナリオではJava 8を維持します。" },
