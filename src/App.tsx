@@ -1578,6 +1578,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       {storyModeActive && scenario.storyMode?.enabled && <StoryModePlayer
         story={scenario.storyMode}
         tutorialSteps={scenario.tutorialSteps}
+        projectDependencies={scenario.project.dependencies}
         focusTargetId={observationTargetId}
         onStepChange={handleObservationStepChange}
         onExit={() => {

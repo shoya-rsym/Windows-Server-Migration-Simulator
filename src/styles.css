@@ -488,10 +488,27 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .observation-eyebrow { color: #567ca6; font-size: 11px; font-weight: 800; letter-spacing: .45px; }
 .observation-progress { height: 4px; overflow: hidden; border-radius: 3px; background: #e5ebf2; }
 .observation-progress span { height: 100%; display: block; border-radius: inherit; background: #4f8bd0; transition: width .25s ease; }
+.observation-phase-bar { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 5px; margin: -4px 0 11px; }
+.observation-phase { min-width: 0; display: grid; gap: 4px; color: #718198; }
+.observation-phase > span { display: flex; align-items: center; gap: 4px; overflow-wrap: anywhere; font-size: 9px; line-height: 1.25; }
+.observation-phase > span small { flex: 0 0 auto; display: grid; width: 15px; height: 15px; place-items: center; color: #75869a; border-radius: 50%; background: #edf1f5; font-size: 8px; font-weight: 750; }
+.observation-phase.active > span { color: #245c93; font-weight: 800; }
+.observation-phase.active > span small { color: #fff; background: #397fca; }
+.observation-phase.complete > span { color: #417b58; }
+.observation-phase.complete > span small { color: #fff; background: #5b9b70; }
+.observation-phase-progress { height: 4px; overflow: hidden; border-radius: 3px; background: #e5ebf2; }
+.observation-phase-progress i { height: 100%; display: block; border-radius: inherit; background: #4f8bd0; transition: width .25s ease; }
+.observation-phase.complete .observation-phase-progress i { background: #5b9b70; }
 .observation-instruction,.observation-explanation { margin-top: 8px; padding: 9px 11px; color: #52667e; border-left: 3px solid #6b9bce; border-radius: 3px; background: #f1f6fc; }
 .observation-instruction strong,.observation-explanation strong { color: #3e5f84; font-size: 12px; }
 .observation-instruction p,.observation-explanation p { margin: 4px 0 0; font-size: 14px; line-height: 1.6; }
 .observation-explanation { border-left-color: #8ba7c7; background: #f8fafc; }
+.observation-failure-example { display: grid; gap: 4px; margin-top: 8px; padding: 10px 12px; color: #755331; border: 1px solid #ebc99f; border-left: 4px solid #d99036; border-radius: 5px; background: #fff8ed; }
+.observation-failure-example > strong { color: #9a5c1f; font-size: 12px; }
+.observation-failure-example > strong span { margin-right: 4px; font-size: 14px; }
+.observation-failure-example h2 { margin: 1px 0 0; color: #684927; font-size: 13px; }
+.observation-failure-example p { margin: 0; font-size: 12px; line-height: 1.5; }
+.observation-failure-example p b { color: #875322; }
 .observation-ai-comment { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; padding: 8px 10px; color: #75633f; border: 1px solid #eee4c9; border-radius: 5px; background: #fffaf0; }
 .observation-ai-comment > svg { flex: 0 0 auto; margin-top: 1px; color: #c18a32; }
 .observation-ai-comment strong { font-size: 12px; }.observation-ai-comment p { margin: 3px 0 0; font-size: 13px; line-height: 1.55; }
@@ -521,11 +538,33 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .observation-failure-diagram li { display: grid; justify-items: center; gap: 3px; color: #596d84; font-size: 11px; text-align: center; }.observation-failure-diagram li span { padding: 4px 8px; border: 1px solid #dce4ec; border-radius: 4px; background: white; }.observation-failure-diagram li b { color: #af765c; font-size: 14px; }
 .observation-failure-cause { margin-bottom: 9px; padding: 8px; color: #665746; border: 1px solid #efe1d2; border-radius: 4px; background: #fff9f3; }
 .observation-failure-cause strong { color: #8a6148; font-size: 11px; }.observation-failure-cause p { margin: 3px 0 0; font-size: 11px; line-height: 1.5; }
-.observation-complete { top: 62px; bottom: 14px; left: 50%; width: min(690px,calc(100vw - 28px)); max-height: none; transform: translateX(-50%); }
+.observation-complete { top: 54px; bottom: 12px; left: 50%; width: min(900px,calc(100vw - 28px)); max-height: none; transform: translateX(-50%); text-align: left; }
+.observation-review-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.observation-review-header .observation-complete-icon { flex: 0 0 auto; margin: 0; }
+.observation-review-header h1 { margin: 2px 0 0; }
+.observation-review-metrics { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 6px; margin: 8px 0; }
+.observation-review-metrics article { min-width: 0; display: grid; gap: 2px; padding: 7px 8px; border: 1px solid #dfe7ef; border-radius: 5px; background: #f8fafc; }
+.observation-review-metrics article > span,.observation-review-metrics article > small { color: #64778e; font-size: 9px; line-height: 1.35; }
+.observation-review-metrics article > strong { color: #365879; font-size: 15px; }
+.observation-review-flow h2,.observation-review-details h2 { margin: 0 0 6px; color: #405b78; font-size: 13px; }
+.observation-review-flow ol { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px; margin: 0; padding: 0; list-style: none; }
+.observation-review-flow ol > li { display: flex; align-items: flex-start; gap: 7px; min-width: 0; padding: 7px; border: 1px solid #e1e8ef; border-radius: 5px; background: #fff; }
+.observation-review-number { flex: 0 0 auto; display: grid; width: 19px; height: 19px; place-items: center; color: #fff; border-radius: 50%; background: #4f83b8; font-size: 10px; font-weight: 800; }
+.observation-review-flow h3 { margin: 0 0 3px; color: #415a75; font-size: 11px; }
+.observation-review-flow ol ul { margin: 0; padding-left: 14px; color: #5b6d82; font-size: 9px; line-height: 1.4; }
+.observation-review-details { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); gap: 8px; margin-top: 8px; }
+.observation-review-details > section { min-width: 0; padding: 8px; border: 1px solid #e1e8ef; border-radius: 5px; background: #fbfcfe; }
+.observation-review-details .observation-learning-list { grid-template-columns: 1fr; gap: 4px; margin: 0; }
+.observation-review-details .observation-learning-list li { font-size: 10px; }
+.observation-system-map ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.observation-system-map li { display: grid; grid-template-columns: minmax(0,auto) 14px minmax(0,auto); align-items: center; gap: 3px 5px; padding: 5px 6px; border-radius: 4px; background: #f1f6fc; }
+.observation-system-map li strong { color: #405c7a; font-size: 10px; overflow-wrap: anywhere; }
+.observation-system-map li svg { color: #6b8eb2; }
+.observation-system-map li small { grid-column: 1 / -1; color: #6b7b8e; font-size: 9px; line-height: 1.35; }
+.observation-system-map p { margin: 0; color: #66788c; font-size: 10px; }
 .observation-complete-icon { width: 42px; height: 42px; display: grid; place-items: center; margin: 0 auto 6px; color: #fff; border-radius: 50%; background: #56a275; }
-.observation-complete { text-align: center; }.observation-learning-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 12px; margin: 10px 0; padding: 0; text-align: left; list-style: none; }
+.observation-learning-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 12px; margin: 10px 0; padding: 0; text-align: left; list-style: none; }
 .observation-learning-list li { display: flex; align-items: flex-start; gap: 6px; color: #52677e; font-size: 10px; line-height: 1.4; }.observation-learning-list svg { flex: 0 0 auto; color: #57946d; }
-.observation-complete-summary { display: flex; justify-content: center; gap: 18px; padding: 8px; color: #687c92; border: 1px solid #e2e8ef; border-radius: 4px; background: #f8fafc; font-size: 11px; }.observation-complete-summary strong { margin-left: 4px; color: #405a78; }
 .observation-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 @media (max-width: 800px) {
   .observation-card { padding: 14px; }
@@ -533,4 +572,12 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
   .observation-toolbar .observation-quiet-button { min-height: 30px; padding: 4px 6px; font-size: 10px; }
   .observation-learning-list { grid-template-columns: 1fr; gap: 4px; }
   .observation-step-controls,.observation-footer-next { flex-wrap: wrap; }
+  .observation-phase-bar { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .observation-review-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .observation-review-flow ol { grid-template-columns: 1fr; }
+  .observation-review-details { grid-template-columns: 1fr; }
+  .observation-complete { top: 48px; bottom: 8px; width: calc(100vw - 16px); padding: 12px; }
+}
+@media (max-width: 480px) {
+  .observation-review-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }

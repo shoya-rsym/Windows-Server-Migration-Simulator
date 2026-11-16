@@ -107,13 +107,27 @@ describe("scenario integrity validation", () => {
     expect(scenario.storyMode?.enabled).toBe(true);
     expect(scenario.storyMode?.steps).toHaveLength(33);
     expect(scenario.tutorialSteps).toHaveLength(33);
+    expect(scenario.storyMode?.phases?.map((phase) => phase.endStep)).toEqual([8, 16, 19, 28, 31, 33]);
+    expect(scenario.storyMode?.review?.flow).toHaveLength(7);
+    expect(scenario.storyMode?.review?.learningOutcomes).toContain("JDBCがAPとOracleを接続する仕組み");
     expect(scenario.storyMode?.steps.map((step) => step.tutorialStepId).sort())
       .toEqual(scenario.tutorialSteps.map((step) => step.id).sort());
     expect(scenario.storyMode?.steps.map((step) => step.tutorialStepId)).toContain("reduce-dns-ttl");
     expect(scenario.storyMode?.steps.find((step) => step.tutorialStepId === "review-project-mail")?.quiz).toBeDefined();
+    expect(scenario.storyMode?.steps.find((step) => step.tutorialStepId === "migrate-database")?.failureExample?.impact)
+      .toContain("データ欠損");
+    expect(scenario.storyMode?.steps.find((step) => step.tutorialStepId === "migrate-jdbc")?.failureExample?.description)
+      .toContain("旧DB");
     expect(scenario.tutorialSteps.map((step) => step.id)).toContain("review-project-meeting");
     expect(scenario.storyMode?.steps.find((step) => step.tutorialStepId === "reduce-dns-ttl")?.failureBranch?.diagram)
       .toContain("旧DNSキャッシュ (TTL 86400秒)");
+  });
+
+  it("rejects story phase ranges with a gap or overlap", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    invalidScenario.storyMode.phases[1].startStep = 10;
+
+    expect(() => loadScenario(invalidScenario)).toThrow("観察工程は手順1から重複・欠落なく連続する範囲で指定してください");
   });
 
   it("requires exactly one recommended answer in each story quiz", () => {

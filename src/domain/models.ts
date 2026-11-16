@@ -209,10 +209,34 @@ export interface StoryFailureBranch {
   recovery: string;
 }
 
+export interface StoryFailureExample {
+  title: string;
+  description: string;
+  impact: string;
+}
+
+export interface StoryPhase {
+  id: string;
+  title: string;
+  startStep: number;
+  endStep: number;
+}
+
+export interface StoryReviewSection {
+  title: string;
+  items: string[];
+}
+
+export interface StoryReview {
+  flow: StoryReviewSection[];
+  learningOutcomes: string[];
+}
+
 export interface StoryStep {
   tutorialStepId: string;
   aiComment: string;
   autoActions: StoryAction[];
+  failureExample?: StoryFailureExample;
   quiz?: {
     question: string;
     choices: StoryQuizChoice[];
@@ -224,6 +248,8 @@ export interface StoryStep {
 export interface StoryModeDefinition {
   enabled: boolean;
   steps: StoryStep[];
+  phases?: StoryPhase[];
+  review?: StoryReview;
 }
 
 export type ManagerApp =

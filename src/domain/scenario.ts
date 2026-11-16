@@ -58,6 +58,19 @@ function addDuplicateIssues(
 
 const storyModeSchema = z.object({
   enabled: z.boolean(),
+  phases: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    startStep: z.number().int().positive(),
+    endStep: z.number().int().positive(),
+  })).min(1).optional(),
+  review: z.object({
+    flow: z.array(z.object({
+      title: z.string().min(1),
+      items: z.array(z.string().min(1)).min(1),
+    })).min(1),
+    learningOutcomes: z.array(z.string().min(1)).min(1),
+  }).optional(),
   steps: z.array(z.object({
     tutorialStepId: z.string().min(1),
     aiComment: z.string().min(1),
@@ -67,6 +80,11 @@ const storyModeSchema = z.object({
       command: z.string().min(1).optional(),
       output: z.array(z.string().min(1)),
     })).min(1),
+    failureExample: z.object({
+      title: z.string().min(1),
+      description: z.string().min(1),
+      impact: z.string().min(1),
+    }).optional(),
     quiz: z.object({
       question: z.string().min(1),
       choices: z.array(z.object({
@@ -573,7 +591,7 @@ const scenarioSchema = z.object({
     });
   });
   if (scenario.storyMode) {
-    const { steps } = scenario.storyMode;
+    const { steps, phases } = scenario.storyMode;
     addDuplicateIssues(steps.map((step) => step.tutorialStepId), context, ["storyMode", "steps"], "観察モードのチュートリアル参照");
     if (scenario.storyMode.enabled && scenario.tutorialSteps.length === 0) {
       context.addIssue({
@@ -581,6 +599,34 @@ const scenarioSchema = z.object({
         message: "観察モードを有効にする場合はチュートリアル手順を1件以上指定してください。",
         path: ["tutorialSteps"],
       });
+    }
+    if (phases) {
+      addDuplicateIssues(phases.map((phase) => phase.id), context, ["storyMode", "phases"], "観察工程ID");
+      let nextStep = 1;
+      phases.forEach((phase, index) => {
+        if (phase.startStep !== nextStep || phase.endStep < phase.startStep) {
+          context.addIssue({
+            code: "custom",
+            message: "観察工程は手順1から重複・欠落なく連続する範囲で指定してください。",
+            path: ["storyMode", "phases", index],
+          });
+        }
+        if (phase.endStep > scenario.tutorialSteps.length) {
+          context.addIssue({
+            code: "custom",
+            message: `観察工程の終了手順がチュートリアルの手順数を超えています: ${phase.endStep}`,
+            path: ["storyMode", "phases", index, "endStep"],
+          });
+        }
+        nextStep = phase.endStep + 1;
+      });
+      if (phases.length > 0 && nextStep - 1 !== scenario.tutorialSteps.length) {
+        context.addIssue({
+          code: "custom",
+          message: "観察工程はチュートリアルの最終手順まで含めてください。",
+          path: ["storyMode", "phases"],
+        });
+      }
     }
     steps.forEach((step, index) => {
       if (!scenario.tutorialSteps.some((tutorialStep) => tutorialStep.id === step.tutorialStepId)) {

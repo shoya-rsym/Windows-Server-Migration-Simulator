@@ -9,24 +9,27 @@ import {
   RotateCcw,
   SkipForward,
 } from "lucide-react";
-import type { StoryModeDefinition, TutorialStep } from "../domain/models";
+import type { ProjectDependency, StoryModeDefinition, StoryPhase, TutorialStep } from "../domain/models";
 
 type FocusRect = { top: number; left: number; width: number; height: number };
 type QuizProgress = {
   selectedChoiceId: string | null;
   outcome: "correct" | "skipped" | null;
   feedback: string;
+  wrongAttemptCount: number;
 };
 
 const EMPTY_QUIZ_PROGRESS: QuizProgress = {
   selectedChoiceId: null,
   outcome: null,
   feedback: "",
+  wrongAttemptCount: 0,
 };
 
 export function StoryModePlayer({
   story,
   tutorialSteps,
+  projectDependencies,
   focusTargetId,
   onStepChange,
   onExit,
@@ -34,6 +37,7 @@ export function StoryModePlayer({
 }: {
   story: StoryModeDefinition;
   tutorialSteps: TutorialStep[];
+  projectDependencies: ProjectDependency[];
   focusTargetId: string;
   onStepChange: (step: TutorialStep) => void;
   onExit: () => void;
@@ -57,6 +61,17 @@ export function StoryModePlayer({
 
   if (!step) throw new Error("観察モードのチュートリアル手順がありません。");
 
+  const phases: StoryPhase[] = story.phases ?? [{
+    id: "project",
+    title: "案件進行",
+    startStep: 1,
+    endStep: tutorialSteps.length,
+  }];
+  const reviewFlow = story.review?.flow ?? phases.map((phase) => ({
+    title: phase.title,
+    items: tutorialSteps.slice(phase.startStep - 1, phase.endStep).map((item) => summaryLabel(item.instruction)),
+  }));
+  const learningOutcomes = story.review?.learningOutcomes ?? tutorialSteps.map((item) => summaryLabel(item.instruction));
   const quizProgress = quizProgressByStep[step.id] ?? EMPTY_QUIZ_PROGRESS;
   const enhancement = story.steps.find((item) => item.tutorialStepId === step.id);
   const actions = enhancement?.autoActions ?? [];
@@ -64,6 +79,49 @@ export function StoryModePlayer({
   const recommendedChoice = quiz?.choices.find((choice) => choice.correct);
   const playbackComplete = visibleActionCount >= actions.length;
   const cardPositionStyle = completedAt === null ? cardPosition ?? undefined : undefined;
+  const quizSteps = story.steps.filter((item) => item.quiz);
+  const answeredQuizCount = quizSteps.filter((item) => quizProgressByStep[item.tutorialStepId]?.outcome === "correct").length;
+  const skippedQuizCount = quizSteps.filter((item) => quizProgressByStep[item.tutorialStepId]?.outcome === "skipped").length;
+  const unansweredQuizCount = quizSteps.length - answeredQuizCount - skippedQuizCount;
+  const firstTryCorrectCount = quizSteps.filter((item) => {
+    const progress = quizProgressByStep[item.tutorialStepId];
+    return progress?.outcome === "correct" && progress.wrongAttemptCount === 0;
+  }).length;
+  const firstTryAccuracy = answeredQuizCount > 0
+    ? Math.round((firstTryCorrectCount / answeredQuizCount) * 100)
+    : null;
+  const wrongAttemptCount = quizSteps.reduce(
+    (total, item) => total + (quizProgressByStep[item.tutorialStepId]?.wrongAttemptCount ?? 0),
+    0,
+  );
+  const currentStepNumber = stepIndex + 1;
+  const phaseBar = (allComplete = false) => (
+    <nav className="observation-phase-bar" aria-label="案件全体の工程">
+      {phases.map((phase, index) => {
+        const complete = allComplete || currentStepNumber > phase.endStep;
+        const active = !allComplete && currentStepNumber >= phase.startStep && currentStepNumber <= phase.endStep;
+        const stepCount = phase.endStep - phase.startStep + 1;
+        const progress = complete
+          ? 100
+          : active
+            ? Math.round(((currentStepNumber - phase.startStep + 1) / stepCount) * 100)
+            : 0;
+        return (
+          <div className={`observation-phase ${complete ? "complete" : ""} ${active ? "active" : ""}`} key={phase.id} aria-current={active ? "step" : undefined}>
+            <span><small>{index + 1}</small>{phase.title}</span>
+            <div
+              className="observation-phase-progress"
+              role="progressbar"
+              aria-label={`${phase.title}の進捗`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress}
+            ><i style={{ width: `${progress}%` }} /></div>
+          </div>
+        );
+      })}
+    </nav>
+  );
 
   useEffect(() => {
     onStepChangeRef.current(step);
@@ -273,12 +331,17 @@ export function StoryModePlayer({
         feedback: quiz.answerExplanation,
       });
     } else if (enhancement?.failureBranch) {
-      updateQuizProgress({ selectedChoiceId: choiceId, feedback: "" });
+      updateQuizProgress({
+        selectedChoiceId: choiceId,
+        feedback: "",
+        wrongAttemptCount: quizProgress.wrongAttemptCount + 1,
+      });
       setFailureOccurred(true);
       setFailureVisible(true);
     } else {
       updateQuizProgress({
         selectedChoiceId: choiceId,
+        wrongAttemptCount: quizProgress.wrongAttemptCount + 1,
         feedback: choice.feedback ?? "推奨回答ではありません。選択肢を見直して、もう一度考えてみましょう。",
       });
     }
@@ -328,6 +391,7 @@ export function StoryModePlayer({
     const failure = enhancement.failureBranch;
     overlayContent = (
       <section ref={cardRef} className="observation-card observation-failure" style={cardPositionStyle} aria-live="polite">
+        {phaseBar()}
         <span className="observation-eyebrow">判断の結果を見てみましょう</span>
         <h1>{failure.title}</h1>
         <p className="observation-failure-impact">{failure.impact}</p>
@@ -357,29 +421,86 @@ export function StoryModePlayer({
   } else if (completedAt !== null) {
     const elapsedMinutes = Math.max(1, Math.ceil((completedAt - startedAt.current) / 60_000));
     overlayContent = (
-      <section className="observation-card observation-complete">
-        <div className="observation-complete-icon"><CheckCircle2 size={26} /></div>
-        <span className="observation-eyebrow">チュートリアルの流れを見終えました</span>
-        <h1>今回学んだ内容</h1>
-        <ul className="observation-learning-list">
-          {tutorialSteps.map((item, index) => (
-            <li key={item.id}><CheckCircle2 size={15} />手順 {index + 1}: {summaryLabel(item.instruction)}</li>
-          ))}
-        </ul>
-        <div className="observation-complete-summary">
-          <span>所要時間 <strong>約{elapsedMinutes}分</strong></span>
-          <span>失敗シナリオ <strong>{failureOccurred ? "体験しました" : "未体験"}</strong></span>
+      <section className="observation-card observation-complete" aria-label="案件レビュー">
+        {phaseBar(true)}
+        <header className="observation-review-header">
+          <div className="observation-complete-icon"><CheckCircle2 size={24} /></div>
+          <div>
+            <span className="observation-eyebrow">観察モード · 案件レビュー</span>
+            <h1>案件全体を振り返る</h1>
+          </div>
+        </header>
+        <div className="observation-review-metrics">
+          <article><span>所要時間</span><strong>約{elapsedMinutes}分</strong></article>
+          <article>
+            <span>クイズ回答</span>
+            <strong>{answeredQuizCount} / {quizSteps.length}問</strong>
+            <small>スキップ {skippedQuizCount} · 未回答 {unansweredQuizCount}</small>
+          </article>
+          <article>
+            <span>初回正答率</span>
+            <strong>{firstTryAccuracy === null ? "—" : `${firstTryAccuracy}%`}</strong>
+            <small>{firstTryCorrectCount} / {answeredQuizCount}問</small>
+          </article>
+          <article>
+            <span>誤答・再考</span>
+            <strong>{wrongAttemptCount}回</strong>
+            <small>初回の選択から集計</small>
+          </article>
+          <article>
+            <span>失敗シナリオ</span>
+            <strong>{failureOccurred ? "体験済み" : "未体験"}</strong>
+          </article>
+        </div>
+        <section className="observation-review-flow" aria-label="案件全体の流れ">
+          <h2>案件全体の流れ</h2>
+          <ol>
+            {reviewFlow.map((section, index) => (
+              <li key={`${section.title}-${index}`}>
+                <span className="observation-review-number">{index + 1}</span>
+                <div>
+                  <h3>{section.title}</h3>
+                  <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+        <div className="observation-review-details">
+          <section aria-label="今回学んだ内容">
+            <h2>今回学んだ内容</h2>
+            <ul className="observation-learning-list">
+              {learningOutcomes.map((item) => (
+                <li key={item}><CheckCircle2 size={14} />{item}</li>
+              ))}
+            </ul>
+          </section>
+          <section className="observation-system-map" aria-label="システム全体図">
+            <h2>システム全体図</h2>
+            {projectDependencies.length > 0
+              ? <ul>{projectDependencies.map((dependency) => (
+                <li key={dependency.id}>
+                  <strong>{dependency.from}</strong>
+                  <ArrowRight size={13} aria-hidden="true" />
+                  <strong>{dependency.to}</strong>
+                  <small>{dependency.reason}</small>
+                </li>
+              ))}</ul>
+              : <p>このシナリオには接続関係が定義されていません。</p>}
+          </section>
         </div>
         <div className="observation-actions">
           <button className="observation-quiet-button" onClick={() => goToStep(0)}><ArrowLeft size={15} />手順を見返す</button>
           <button className="observation-quiet-button" onClick={restart}><RotateCcw size={15} />もう一度見る</button>
           <button className="observation-primary-button" onClick={onStartTutorial}><Play size={15} />チュートリアルを始める</button>
+          <button className="observation-quiet-button" onClick={closeToDesktop}><ArrowLeft size={15} />デスクトップへ戻る</button>
         </div>
       </section>
     );
   } else {
     overlayContent = (
       <section ref={cardRef} className="observation-card" style={cardPositionStyle} aria-live="polite">
+        {phaseBar()}
         <div className="observation-step-heading">
           <span className="observation-eyebrow">チュートリアルを観察 · 手順 {stepIndex + 1} / {tutorialSteps.length}</span>
           <div className="observation-progress"><span style={{ width: `${((stepIndex + 1) / tutorialSteps.length) * 100}%` }} /></div>
@@ -392,6 +513,14 @@ export function StoryModePlayer({
           <strong>なぜ必要？</strong>
           <p>{step.explanation}</p>
         </div>
+        {enhancement?.failureExample && (
+          <aside className="observation-failure-example" aria-label="この作業を飛ばした場合の影響">
+            <strong><span aria-hidden="true">⚠</span> この作業を飛ばすと？</strong>
+            <h2>{enhancement.failureExample.title}</h2>
+            <p>{enhancement.failureExample.description}</p>
+            <p><b>想定される影響:</b> {enhancement.failureExample.impact}</p>
+          </aside>
+        )}
         {enhancement && (
           <div className="observation-ai-comment">
             <Lightbulb size={16} />
