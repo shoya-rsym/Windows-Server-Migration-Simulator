@@ -48,10 +48,44 @@ function addDuplicateIssues(
   });
 }
 
+const storyModeSchema = z.object({
+  enabled: z.boolean(),
+  steps: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    targetElement: z.string().min(1),
+    explanation: z.string().min(1),
+    aiComment: z.string().min(1),
+    autoActions: z.array(z.object({
+      label: z.string().min(1),
+      actor: z.string().min(1),
+      command: z.string().min(1).optional(),
+      output: z.array(z.string().min(1)),
+    })).min(1),
+    quiz: z.object({
+      question: z.string().min(1),
+      choices: z.array(z.object({
+        id: z.string().min(1),
+        label: z.string().min(1),
+        correct: z.boolean(),
+      })).min(2),
+      answerExplanation: z.string().min(1),
+    }).optional(),
+    failureBranch: z.object({
+      title: z.string().min(1),
+      impact: z.string().min(1),
+      diagram: z.array(z.string().min(1)).min(1),
+      cause: z.string().min(1),
+      recovery: z.string().min(1),
+    }).optional(),
+  })),
+});
+
 const scenarioSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().min(1),
+  storyMode: storyModeSchema.optional(),
   project: z.object({
     users: z.number().int().positive(),
     downtimeLimitMinutes: z.number().positive(),
@@ -531,6 +565,36 @@ const scenarioSchema = z.object({
       }
     });
   });
+  if (scenario.storyMode) {
+    const { steps } = scenario.storyMode;
+    addDuplicateIssues(steps.map((step) => step.id), context, ["storyMode", "steps"], "観察モード手順ID");
+    if (scenario.storyMode.enabled && steps.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "観察モードを有効にする場合は手順を1件以上指定してください。",
+        path: ["storyMode", "steps"],
+      });
+    }
+    steps.forEach((step, index) => {
+      if (step.quiz) {
+        addDuplicateIssues(step.quiz.choices.map((choice) => choice.id), context, ["storyMode", "steps", index, "quiz", "choices"], "観察クイズ選択肢ID");
+        if (step.quiz.choices.filter((choice) => choice.correct).length !== 1) {
+          context.addIssue({
+            code: "custom",
+            message: "観察クイズには推奨回答を1つだけ指定してください。",
+            path: ["storyMode", "steps", index, "quiz", "choices"],
+          });
+        }
+      }
+      if (step.failureBranch && !step.quiz) {
+        context.addIssue({
+          code: "custom",
+          message: "失敗シナリオには判断クイズが必要です。",
+          path: ["storyMode", "steps", index, "failureBranch"],
+        });
+      }
+    });
+  }
   Object.entries(scenario.learningOrderByMode).forEach(([mode, objectiveIds]) => {
     addDuplicateIssues(objectiveIds, context, ["learningOrderByMode", mode], "学習目標順序");
     objectiveIds.forEach((objectiveId) => {

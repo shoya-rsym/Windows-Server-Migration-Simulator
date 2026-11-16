@@ -69,6 +69,7 @@ import type {
   Task,
   TransferPackage,
 } from "./domain/models";
+import { StoryModePlayer } from "./components/StoryModePlayer";
 import { loadScenario } from "./domain/scenario";
 import { createInitialProjectWorkspace } from "./domain/project";
 import { parseSimulationSave, type SimulationSave } from "./domain/save";
@@ -91,6 +92,7 @@ if (scenarios.length === 0) throw new Error("シナリオJSONが見つかりま�
 const defaultAdvisor = createLocalAdvisor();
 type DesktopShortcut = "cmd" | "powershell" | "explorer" | ManagerApp;
 type ShellMode = "cmd" | "powershell";
+type StartExperience = DifficultyMode | "story";
 
 function readSimulationSave(saveKey: string): { save: SimulationSave | null; error: string | null } {
   try {
@@ -175,9 +177,10 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   const [storedRead] = useState(() => readSimulationSave(saveKey));
   const [storedSave, setStoredSave] = useState<SimulationSave | null>(storedRead.save);
   const [storageError, setStorageError] = useState(storedRead.error);
-  const [screen, setScreen] = useState<"desktop" | "lab">("desktop");
+  const [screen, setScreen] = useState<"desktop" | "lab" | "story">("desktop");
   const [sessionStarted, setSessionStarted] = useState(false);
   const [mode, setMode] = useState<DifficultyMode>("tutorial");
+  const [startExperience, setStartExperience] = useState<StartExperience>("tutorial");
   const [provider, setProvider] = useState<DeploymentProvider>("onprem");
   const [cloudWorkspace, setCloudWorkspace] = useState<CloudWorkspace>(() => createInitialCloudWorkspace());
   const [desktopShortcut, setDesktopShortcut] = useState<DesktopShortcut>("cmd");
@@ -1025,10 +1028,27 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           ? "切替後、ログインできません。"
           : scenario.incidents.find((incident) => incident.id === expertIncidentId)?.description ?? "業務システムで障害が発生しています。ログと構成から原因を特定してください。";
 
+  if (screen === "story") {
+    const story = scenario.storyMode;
+    if (!story?.enabled) throw new Error(`Scenario ${scenario.id} does not provide an enabled story mode.`);
+    return (
+      <StoryModePlayer
+        story={story}
+        onExit={() => setScreen("desktop")}
+        onStartTutorial={() => {
+          setMode("tutorial");
+          setStartExperience("tutorial");
+          setScreen("desktop");
+        }}
+      />
+    );
+  }
+
   if (screen === "desktop") {
     return (
       <DesktopHome
         mode={mode}
+        startExperience={startExperience}
         provider={provider}
         shortcut={desktopShortcut}
         serverId={desktopServerId}
@@ -1040,7 +1060,10 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         scenario={scenario}
         scenarios={scenarios}
         onScenarioChange={onScenarioChange}
-        onModeChange={setMode}
+        onModeChange={(nextExperience) => {
+          setStartExperience(nextExperience);
+          if (nextExperience !== "story") setMode(nextExperience);
+        }}
         onProviderChange={(nextProvider) => {
           if (provider !== nextProvider) setCloudWorkspace(createInitialCloudWorkspace());
           setProvider(nextProvider);
@@ -1056,7 +1079,13 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
           else if (isManagerShortcut(shortcut) && sourceApplication) setDesktopServerId(sourceApplication.id);
         }}
         onServerChange={setDesktopServerId}
-        onStart={() => { if (cloudSetupReady) startFreshSession(); }}
+        onStart={() => {
+          if (startExperience === "story") {
+            if (scenario.storyMode?.enabled) setScreen("story");
+            return;
+          }
+          if (cloudSetupReady) startFreshSession();
+        }}
         onContinue={continueSession}
         onStartOver={() => startFreshSession(true)}
       />
@@ -1341,6 +1370,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
 
 function DesktopHome({
   mode,
+  startExperience,
   provider,
   shortcut,
   serverId,
@@ -1362,6 +1392,7 @@ function DesktopHome({
   onStartOver,
 }: {
   mode: DifficultyMode;
+  startExperience: StartExperience;
   provider: DeploymentProvider;
   shortcut: DesktopShortcut;
   serverId: string;
@@ -1372,7 +1403,7 @@ function DesktopHome({
   storageError: string | null;
   scenario: Scenario;
   scenarios: Scenario[];
-  onModeChange: (mode: DifficultyMode) => void;
+  onModeChange: (experience: StartExperience) => void;
   onProviderChange: (provider: DeploymentProvider) => void;
   onCloudWorkspaceChange: (workspace: CloudWorkspace) => void;
   onShortcutChange: (shortcut: DesktopShortcut) => void;
@@ -1436,9 +1467,9 @@ function DesktopHome({
             <label className="desktop-setting-row"><span>案件</span><select value={scenario.id} onChange={(event) => onScenarioChange(event.target.value)}>{scenarios.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
             <label className="desktop-setting-row"><span>基盤</span><select value={provider} onChange={(event) => onProviderChange(event.target.value as DeploymentProvider)}><option value="onprem">オンプレミス</option><option value="aws">AWS</option><option value="azure">Azure</option></select></label>
             <label className="desktop-setting-row"><span>接続先</span><select value={selectedServer?.id ?? availableServers[0]?.id ?? ""} onChange={(event) => onServerChange(event.target.value)}>{availableServers.map((server) => <option value={server.id} key={server.id}>{server.hostname} — {server.role}</option>)}</select></label>
-            <label className="desktop-setting-row"><span>難易度</span><select value={mode} onChange={(event) => onModeChange(event.target.value as DifficultyMode)}><option value="tutorial">チュートリアル</option><option value="beginner">初級</option><option value="intermediate">中級</option><option value="advanced">上級</option><option value="expert">エキスパート</option></select></label>
-            <div className="mode-description"><strong>{modeLabel(mode)}</strong><span>{modeDescriptions[mode]}</span></div>
-            {mode === "tutorial" && provider !== "onprem" && <section className="cloud-start-tutorial" aria-labelledby="cloud-start-tutorial-title">
+            <label className="desktop-setting-row"><span>学習モード</span><select value={startExperience} onChange={(event) => onModeChange(event.target.value as StartExperience)}><option value="story" disabled={!scenario.storyMode?.enabled}>観察モード</option><option value="tutorial">チュートリアル</option><option value="beginner">初級</option><option value="intermediate">中級</option><option value="advanced">上級</option><option value="expert">エキスパート</option></select></label>
+            <div className="mode-description"><strong>{startExperience === "story" ? "観察モード" : modeLabel(mode)}</strong><span>{startExperience === "story" ? "案件の進行を見ながら、調査・移行・判断の理由を学びます。操作不要で、クイズはスキップできます。" : modeDescriptions[mode]}</span></div>
+            {startExperience !== "story" && mode === "tutorial" && provider !== "onprem" && <section className="cloud-start-tutorial" aria-labelledby="cloud-start-tutorial-title">
               <strong id="cloud-start-tutorial-title">開始前に {provider === "aws" ? "AWS" : "Azure"} 基盤を準備します</strong>
               <p>右上のクラウド画面で、上から順に設定してください。これは学習用の疑似環境で、実クラウドには接続しません。</p>
               <ol>
@@ -1451,9 +1482,9 @@ function DesktopHome({
             <div className="selected-shortcut"><span className="shortcut-window-icon"><Terminal size={17} /></span><div><small>デスクトップ アプリ / 接続先</small><strong>{selectedLabel} → {selectedServer?.hostname ?? availableServers[0]?.hostname}</strong></div><span className="rdp-target">{provider === "aws" ? "EC2 / RDP" : provider === "azure" ? "Azure VM / RDP" : "RDP / Windows Server"}</span></div>
             <div className="desktop-connect-actions">
               {saved && <button className="desktop-continue" onClick={onContinue}><Play size={14} />続きから始める</button>}
-              <button className="desktop-start" disabled={!cloudSetupReady} onClick={onStart}><ArrowRight size={15} />{saved ? "最初から開始" : "RDP接続して開始"}</button>
+              <button className="desktop-start" disabled={!cloudSetupReady && startExperience !== "story"} onClick={onStart}><ArrowRight size={15} />{startExperience === "story" ? "観察を開始" : saved ? "最初から開始" : "RDP接続して開始"}</button>
             </div>
-            {!cloudSetupReady && provider !== "onprem" && <p className="cloud-start-blocked" role="status">クラウド基盤の構築が完了すると開始できます。VMタブで起動状態を、ファイアウォールタブで必要ポートを確認してください。</p>}
+            {!cloudSetupReady && provider !== "onprem" && startExperience !== "story" && <p className="cloud-start-blocked" role="status">クラウド基盤の構築が完了すると開始できます。VMタブで起動状態を、ファイアウォールタブで必要ポートを確認してください。</p>}
             {storageError && <p className="storage-warning" role="status">セーブデータ: {storageError}</p>}
             <p className="desktop-safety"><LockKeyhole size={12} />このアプリ内の疑似環境です。実サーバーやクラウドへ接続しません。</p>
           </div>

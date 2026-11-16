@@ -53,10 +53,12 @@ describe("scenario integrity validation", () => {
       projectChats: _projectChats,
       projectEffortPackages: _projectEffortPackages,
       projectMeetings: _projectMeetings,
+      storyMode: _storyMode,
       ...legacyScenario
     } = structuredClone(scenarioDefinition);
 
-    expect(loadScenario(legacyScenario)).toMatchObject({
+    const loadedScenario = loadScenario(legacyScenario);
+    expect(loadedScenario).toMatchObject({
       projectDocuments: [],
       decisionReviews: [],
       projectMails: [],
@@ -64,6 +66,7 @@ describe("scenario integrity validation", () => {
       projectEffortPackages: [],
       projectMeetings: [],
     });
+    expect(loadedScenario).not.toHaveProperty("storyMode");
   });
 
   it("rejects emails that reference missing project documents", () => {
@@ -94,5 +97,24 @@ describe("scenario integrity validation", () => {
     });
 
     expect(() => loadScenario(invalidScenario)).toThrow("会議議題に推奨判断がありません");
+  });
+
+  it("loads the optional observation story and all seven learning steps", () => {
+    const scenario = loadScenario(scenarioDefinition);
+
+    expect(scenario.storyMode?.enabled).toBe(true);
+    expect(scenario.storyMode?.steps).toHaveLength(7);
+    expect(scenario.storyMode?.steps[4].failureBranch?.diagram).toContain("旧DNSキャッシュ (TTL 86400秒)");
+  });
+
+  it("requires exactly one recommended answer in each story quiz", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    const quiz = invalidScenario.storyMode.steps[4]?.quiz;
+    if (!quiz) throw new Error("観察クイズがありません。");
+    const firstChoice = quiz.choices[0];
+    if (!firstChoice) throw new Error("観察クイズの選択肢がありません。");
+    firstChoice.correct = true;
+
+    expect(() => loadScenario(invalidScenario)).toThrow("観察クイズには推奨回答を1つだけ指定してください");
   });
 });

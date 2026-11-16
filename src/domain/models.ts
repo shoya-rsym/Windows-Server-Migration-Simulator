@@ -186,6 +186,47 @@ export interface TutorialStep {
   explanation: string;
 }
 
+export interface StoryAction {
+  label: string;
+  actor: string;
+  command?: string;
+  output: string[];
+}
+
+export interface StoryQuizChoice {
+  id: string;
+  label: string;
+  correct: boolean;
+}
+
+export interface StoryFailureBranch {
+  title: string;
+  impact: string;
+  diagram: string[];
+  cause: string;
+  recovery: string;
+}
+
+export interface StoryStep {
+  id: string;
+  title: string;
+  targetElement: string;
+  explanation: string;
+  aiComment: string;
+  autoActions: StoryAction[];
+  quiz?: {
+    question: string;
+    choices: StoryQuizChoice[];
+    answerExplanation: string;
+  };
+  failureBranch?: StoryFailureBranch;
+}
+
+export interface StoryModeDefinition {
+  enabled: boolean;
+  steps: StoryStep[];
+}
+
 export type ManagerApp =
   | "setup"
   | "services"
@@ -320,6 +361,7 @@ export interface Scenario {
   learningObjectives: LearningObjective[];
   learningOrderByMode: Record<DifficultyMode, string[]>;
   tutorialSteps: TutorialStep[];
+  storyMode?: StoryModeDefinition;
   auditChecks: AuditCheck[];
   recommendedOrder: string[];
   advisorContext: string;
