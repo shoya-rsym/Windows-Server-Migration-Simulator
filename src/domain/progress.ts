@@ -365,6 +365,7 @@ export function calculateAuditReport(
     architectureEdges: [],
     readDocumentIds: [],
     readMailIds: [],
+    chatResponses: [],
     decisionEvidence: [],
     plannedDowntimeMinutes: scenario.project.downtimeLimitMinutes,
     maintenanceWindow: scenario.project.downtimeWindow,
@@ -520,9 +521,17 @@ function calculateProjectScores(
     + (eventNames.has("verify:task-run") ? 5 : 0)
     + (eventNames.has("verify:service-startup") ? 5 : 0);
   const priorityMails = scenario.projectMails.filter((mail) => mail.importance === "high");
-  const coordinationScore = priorityMails.length === 0
+  const mailReviewScore = priorityMails.length === 0
     ? 100
     : Math.round(priorityMails.filter((mail) => project.readMailIds.includes(mail.id)).length / priorityMails.length * 100);
+  const chatResponseScore = scenario.projectChats.length === 0
+    ? 100
+    : Math.round(scenario.projectChats.reduce((score, chat) => {
+      const response = project.chatResponses.find((item) => item.threadId === chat.id);
+      const choice = chat.choices.find((item) => item.id === response?.choiceId);
+      return score + (choice?.recommended ? 100 : 0);
+    }, 0) / scenario.projectChats.length);
+  const coordinationScore = Math.round((mailReviewScore + chatResponseScore) / 2);
   const riskScore = scenario.decisionReviews.length === 0
     ? 100
     : Math.round((evidenceReviews ?? evaluateProjectEvidence(scenario, project))
@@ -593,6 +602,28 @@ function getProjectFindings(
       id: "unread-priority-mail",
       title: `未確認の重要メールが${unreadPriorityMails.length}件あります`,
       remediation: `案件デスクの「メール」で${unreadPriorityMails.slice(0, 2).map((mail) => `「${mail.subject}」`).join("、")}を読み、変更期限や同期条件を計画へ反映してください。`,
+    });
+  }
+  const unansweredChats = scenario.projectChats.filter((chat) =>
+    !project.chatResponses.some((response) => response.threadId === chat.id),
+  );
+  if (unansweredChats.length > 0) {
+    findings.push({
+      id: "unanswered-stakeholder-chat",
+      title: `未回答の関係者チャットが${unansweredChats.length}件あります`,
+      remediation: `案件デスクの「Teams」で${unansweredChats.slice(0, 2).map((chat) => `${chat.senderRole}からの確認`).join("、")}に返信し、合意内容を計画へ反映してください。`,
+    });
+  }
+  const riskyChatReplies = scenario.projectChats.flatMap((chat) => {
+    const response = project.chatResponses.find((item) => item.threadId === chat.id);
+    const choice = chat.choices.find((item) => item.id === response?.choiceId);
+    return choice && !choice.recommended ? [chat.senderRole] : [];
+  });
+  if (riskyChatReplies.length > 0) {
+    findings.push({
+      id: "risky-stakeholder-reply",
+      title: `関係者との合意にリスクが残っています (${riskyChatReplies.join("、")})`,
+      remediation: "「Teams」の会話と根拠資料を読み直し、TTLの事前短縮、最終同期、停止枠、切戻し条件について関係者と安全な手順を合意してください。",
     });
   }
   const missingDependencies = scenario.project.dependencies.filter((expected) => !project.architectureEdges.some((actual) =>

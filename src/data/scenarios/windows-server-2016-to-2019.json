@@ -181,6 +181,96 @@
       "relatedDocumentId": "operations-manual"
     }
   ],
+  "projectChats": [
+    {
+      "id": "network-chat-ttl",
+      "sentAt": "2026-10-27 13:10",
+      "sender": "yoshida@network.example.local",
+      "senderRole": "ネットワーク担当",
+      "message": "TTL変更依頼がまだ届いていません。切替直前にAレコードと同時変更する前提ですか？",
+      "relatedDocumentId": "network-change-request",
+      "choices": [
+        {
+          "id": "request-ttl-early",
+          "label": "事前申請する",
+          "response": "切替3日前までにTTLを300秒へ短縮する変更を申請します。旧TTLのキャッシュ満了を考慮し、Aレコード変更とは別の作業として調整をお願いします。",
+          "recommended": true
+        },
+        {
+          "id": "change-ttl-with-record",
+          "label": "当日まとめて変更する",
+          "response": "作業を減らすため、切替当日にTTLとAレコードを同時に変更してください。",
+          "recommended": false
+        }
+      ]
+    },
+    {
+      "id": "dba-chat-sync",
+      "sentAt": "2026-10-27 13:24",
+      "sender": "sato@dba.example.local",
+      "senderRole": "DBA",
+      "message": "初回の移行後も業務更新が続く予定ですが、最終同期の開始条件はどうしますか？",
+      "relatedDocumentId": "migration-meeting-minutes",
+      "choices": [
+        {
+          "id": "stop-writes-final-sync",
+          "label": "更新停止後に最終同期する",
+          "response": "業務更新を停止した後、選択方式の手順で最終同期し、移行元と移行先のデータ世代と整合性を確認してからGo判定します。",
+          "recommended": true
+        },
+        {
+          "id": "initial-copy-sufficient",
+          "label": "初回移行だけで切り替える",
+          "response": "初回インポートは完了しているので、業務更新が続いていても追加同期なしで切り替えます。",
+          "recommended": false
+        }
+      ]
+    },
+    {
+      "id": "customer-chat-window",
+      "sentAt": "2026-10-27 14:05",
+      "sender": "tanaka@customer.example.local",
+      "senderRole": "顧客システム担当",
+      "message": "利用部門には停止時間をどのように案内しますか？許容時間を超える場合は日程を再調整したいです。",
+      "relatedDocumentId": "operations-manual",
+      "choices": [
+        {
+          "id": "confirm-window-and-notice",
+          "label": "許容枠と周知時期を共有する",
+          "response": "運用設計の許容上限120分と22:00-24:00の作業枠に収めた計画を提示し、対象業務・停止時間・問い合わせ先を前日までに周知します。",
+          "recommended": true
+        },
+        {
+          "id": "promise-long-outage",
+          "label": "長時間停止を約束する",
+          "response": "作業時間は見積もらず、当日は数時間止まる可能性があると伝えて進めます。",
+          "recommended": false
+        }
+      ]
+    },
+    {
+      "id": "pm-chat-rollback",
+      "sentAt": "2026-10-27 14:22",
+      "sender": "suzuki@pm.example.local",
+      "senderRole": "プロジェクトマネージャー",
+      "message": "会議では、切替後30分以内に主要業務を確認できない場合は切戻しを判断すると決めました。計画に反映されていますか？",
+      "relatedDocumentId": "migration-meeting-minutes",
+      "choices": [
+        {
+          "id": "record-rollback-30",
+          "label": "30分の判断期限を計画へ反映する",
+          "response": "議事録の30分以内という判断期限とデータ不整合条件を切戻し条件に記載し、DNSを戻した後のキャッシュ更新・旧環境疎通も確認項目にします。",
+          "recommended": true
+        },
+        {
+          "id": "extend-rollback-window",
+          "label": "切戻し期限を3時間へ延長する",
+          "response": "切戻し手順は後で決めるため、判断期限は3時間として進めます。",
+          "recommended": false
+        }
+      ]
+    }
+  ],
   "assets": {
     "servers": [
       { "id": "ap-old", "hostname": "APSV01", "role": "application", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },

@@ -77,6 +77,21 @@ export interface ProjectMailMessage {
   relatedDocumentId: string;
 }
 
+export interface ProjectChatThread {
+  id: string;
+  sentAt: string;
+  sender: string;
+  senderRole: string;
+  message: string;
+  relatedDocumentId: string;
+  choices: Array<{
+    id: string;
+    label: string;
+    response: string;
+    recommended: boolean;
+  }>;
+}
+
 export interface ProjectDecisionEvidence {
   id: string;
   decisionId: string;
@@ -102,6 +117,7 @@ export interface ProjectWorkspace {
   architectureEdges: Array<{ id: string; from: string; to: string }>;
   readDocumentIds: string[];
   readMailIds: string[];
+  chatResponses: Array<{ threadId: string; choiceId: string; chosenAt: number }>;
   decisionEvidence: ProjectDecisionEvidence[];
   plannedDowntimeMinutes: number;
   maintenanceWindow: string;
@@ -246,6 +262,7 @@ export interface Scenario {
   projectDocuments: ProjectDocument[];
   decisionReviews: ProjectDecisionReview[];
   projectMails: ProjectMailMessage[];
+  projectChats: ProjectChatThread[];
   assets: {
     servers: Server[];
     vms: VM[];

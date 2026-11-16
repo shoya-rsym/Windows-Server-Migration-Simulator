@@ -50,6 +50,7 @@ describe("scenario integrity validation", () => {
       projectDocuments: _projectDocuments,
       decisionReviews: _decisionReviews,
       projectMails: _projectMails,
+      projectChats: _projectChats,
       ...legacyScenario
     } = structuredClone(scenarioDefinition);
 
@@ -57,6 +58,7 @@ describe("scenario integrity validation", () => {
       projectDocuments: [],
       decisionReviews: [],
       projectMails: [],
+      projectChats: [],
     });
   });
 
@@ -65,5 +67,12 @@ describe("scenario integrity validation", () => {
     invalidScenario.projectMails[0].relatedDocumentId = "missing-document";
 
     expect(() => loadScenario(invalidScenario)).toThrow("案件メールに関連する資料がありません");
+  });
+
+  it("rejects Teams conversations that reference missing project documents", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    invalidScenario.projectChats[0].relatedDocumentId = "missing-document";
+
+    expect(() => loadScenario(invalidScenario)).toThrow("Teams会話に関連する資料がありません");
   });
 });

@@ -98,6 +98,20 @@ const scenarioSchema = z.object({
     importance: z.enum(["normal", "high"]),
     relatedDocumentId: z.string().min(1),
   })).default([]),
+  projectChats: z.array(z.object({
+    id: z.string().min(1),
+    sentAt: z.string().min(1),
+    sender: z.string().min(1),
+    senderRole: z.string().min(1),
+    message: z.string().min(1),
+    relatedDocumentId: z.string().min(1),
+    choices: z.array(z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      response: z.string().min(1),
+      recommended: z.boolean(),
+    })).min(2),
+  })).default([]),
   assets: z.object({
     servers: z.array(z.object({
       id: z.string(),
@@ -243,6 +257,7 @@ const scenarioSchema = z.object({
   addDuplicateIssues(scenario.projectDocuments.map((item) => item.id), context, ["projectDocuments"], "案件資料ID");
   addDuplicateIssues(scenario.decisionReviews.map((item) => item.id), context, ["decisionReviews"], "判断評価ID");
   addDuplicateIssues(scenario.projectMails.map((item) => item.id), context, ["projectMails"], "案件メールID");
+  addDuplicateIssues(scenario.projectChats.map((item) => item.id), context, ["projectChats"], "Teams会話ID");
   scenario.projectDocuments.forEach((document, index) => {
     addDuplicateIssues(document.sections.map((section) => section.id), context, ["projectDocuments", index, "sections"], "資料セクションID");
   });
@@ -266,6 +281,16 @@ const scenarioSchema = z.object({
         path: ["projectMails", index, "relatedDocumentId"],
       });
     }
+  });
+  scenario.projectChats.forEach((chat, index) => {
+    if (!scenario.projectDocuments.some((document) => document.id === chat.relatedDocumentId)) {
+      context.addIssue({
+        code: "custom",
+        message: `Teams会話に関連する資料がありません: ${chat.relatedDocumentId}`,
+        path: ["projectChats", index, "relatedDocumentId"],
+      });
+    }
+    addDuplicateIssues(chat.choices.map((choice) => choice.id), context, ["projectChats", index, "choices"], "Teams返信ID");
   });
   addDuplicateIssues(scenario.project.components.map((component) => component.trim().toLowerCase()), context, ["project", "components"], "構成要素");
   addDuplicateIssues(scenario.project.dependencies.map((item) => item.id), context, ["project", "dependencies"], "依存関係ID");

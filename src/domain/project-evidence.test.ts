@@ -76,11 +76,37 @@ describe("project document evidence review", () => {
     const reviewedReport = calculateAuditReport(scenario, [], 0, 0, 1, {
       ...project,
       readMailIds: priorityMailIds,
+      chatResponses: scenario.projectChats.flatMap((chat) => {
+        const recommendedChoice = chat.choices.find((choice) => choice.recommended);
+        return recommendedChoice
+          ? [{ threadId: chat.id, choiceId: recommendedChoice.id, chosenAt: 1 }]
+          : [];
+      }),
     });
 
     expect(initialReport.projectScores.find((item) => item.id === "coordination")?.score).toBe(0);
     expect(initialReport.projectFindings.some((finding) => finding.id === "unread-priority-mail")).toBe(true);
+    expect(initialReport.projectFindings.some((finding) => finding.id === "unanswered-stakeholder-chat")).toBe(true);
     expect(reviewedReport.projectScores.find((item) => item.id === "coordination")?.score).toBe(100);
     expect(reviewedReport.projectFindings.some((finding) => finding.id === "unread-priority-mail")).toBe(false);
+    expect(reviewedReport.projectFindings.some((finding) => finding.id === "unanswered-stakeholder-chat")).toBe(false);
+  });
+
+  it("flags a reply that conflicts with the agreed migration risk controls", () => {
+    const project = createInitialProjectWorkspace(scenario.project);
+    const unsafeThread = scenario.projectChats.find((thread) => thread.id === "network-chat-ttl");
+    const unsafeChoice = unsafeThread?.choices.find((choice) => !choice.recommended);
+    if (!unsafeThread || !unsafeChoice) throw new Error("Network chat fixture is missing.");
+
+    const report = calculateAuditReport(scenario, [], 0, 0, 1, {
+      ...project,
+      chatResponses: [{
+        threadId: unsafeThread.id,
+        choiceId: unsafeChoice.id,
+        chosenAt: 1,
+      }],
+    });
+
+    expect(report.projectFindings.some((finding) => finding.id === "risky-stakeholder-reply")).toBe(true);
   });
 });

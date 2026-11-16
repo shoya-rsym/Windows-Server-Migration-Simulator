@@ -78,6 +78,11 @@ const projectWorkspaceSchema = z.object({
   })),
   readDocumentIds: z.array(z.string()).default([]),
   readMailIds: z.array(z.string()).default([]),
+  chatResponses: z.array(z.object({
+    threadId: z.string(),
+    choiceId: z.string(),
+    chosenAt: z.number(),
+  })).default([]),
   decisionEvidence: z.array(z.object({
     id: z.string(),
     decisionId: z.string(),

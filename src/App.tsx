@@ -1431,7 +1431,7 @@ function ProjectDeskPanel({
   onRollback: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "plan" | "cutover">("overview");
+  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "teams" | "plan" | "cutover">("overview");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDetail, setNoteDetail] = useState("");
   const [edgeFrom, setEdgeFrom] = useState("");
@@ -1439,6 +1439,7 @@ function ProjectDeskPanel({
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedReviewId, setSelectedReviewId] = useState(scenario.decisionReviews[0]?.id ?? "");
   const [selectedMailId, setSelectedMailId] = useState("");
+  const [selectedChatId, setSelectedChatId] = useState(scenario.projectChats[0]?.id ?? "");
   const [evidenceDocumentId, setEvidenceDocumentId] = useState("");
   const [evidenceSectionId, setEvidenceSectionId] = useState("");
   const [decisionOption, setDecisionOption] = useState("");
@@ -1447,6 +1448,9 @@ function ProjectDeskPanel({
   const selectedDocument = scenario.projectDocuments.find((document) => document.id === selectedDocumentId);
   const selectedReview = scenario.decisionReviews.find((review) => review.id === selectedReviewId);
   const selectedMail = scenario.projectMails.find((mail) => mail.id === selectedMailId);
+  const selectedChat = scenario.projectChats.find((chat) => chat.id === selectedChatId);
+  const selectedChatResponse = selectedChat && project.chatResponses.find((response) => response.threadId === selectedChat.id);
+  const selectedChatChoice = selectedChat?.choices.find((choice) => choice.id === selectedChatResponse?.choiceId);
   const citedDocument = scenario.projectDocuments.find((document) => document.id === evidenceDocumentId);
 
   const openDocument = (document: ProjectDocument) => {
@@ -1461,6 +1465,15 @@ function ProjectDeskPanel({
     if (!project.readMailIds.includes(mailId)) {
       update({ readMailIds: [...project.readMailIds, mailId] });
     }
+  };
+
+  const sendChatReply = (threadId: string, choiceId: string) => {
+    update({
+      chatResponses: [
+        ...project.chatResponses.filter((response) => response.threadId !== threadId),
+        { threadId, choiceId, chosenAt: Date.now() },
+      ],
+    });
   };
 
   const addNote = (event: React.FormEvent<HTMLFormElement>) => {
@@ -1521,6 +1534,7 @@ function ProjectDeskPanel({
     { id: "investigation", label: "調査・構成" },
     { id: "documents", label: "案件資料・判断根拠" },
     { id: "mail", label: `メール (${scenario.projectMails.filter((mail) => mail.importance === "high" && !project.readMailIds.includes(mail.id)).length} 未読)` },
+    { id: "teams", label: `Teams (${scenario.projectChats.filter((chat) => !project.chatResponses.some((response) => response.threadId === chat.id)).length} 未回答)` },
     { id: "plan", label: "計画・周知" },
     { id: "cutover", label: "切替判断" },
   ];
@@ -1643,6 +1657,41 @@ function ProjectDeskPanel({
                   </>}
                 </article>
                 : <p className="project-empty">メールを選択して内容を確認してください。重要メールを読むと案件評価へ反映されます。</p>}
+            </section>
+          </div>
+        </div>}
+
+        {tab === "teams" && <div className="project-tab-content">
+          <div className="project-teams-toolbar"><MessageCircle size={15} /><strong>プロジェクト チャット</strong><span>返信を選ぶと案件記録に残り、合意リスクの評価へ反映されます。</span></div>
+          <div className="project-teams-layout">
+            <section className="project-section project-teams-people">
+              <h3>関係者</h3>
+              {scenario.projectChats.length === 0
+                ? <p className="project-empty">チャットはありません。</p>
+                : scenario.projectChats.map((chat) => {
+                  const answered = project.chatResponses.some((response) => response.threadId === chat.id);
+                  return <button className={selectedChatId === chat.id ? "active" : ""} key={chat.id} onClick={() => setSelectedChatId(chat.id)}>
+                    <span className="project-teams-avatar">{chat.senderRole.slice(0, 1)}</span>
+                    <span><strong>{chat.senderRole}</strong><small>{chat.sender.split("@")[0]} · {chat.sentAt}</small></span>
+                    <em>{answered ? "返信済み" : "未回答"}</em>
+                  </button>;
+                })}
+            </section>
+            <section className="project-section project-teams-conversation">
+              {selectedChat
+                ? <>
+                  <header><span className="project-teams-avatar">{selectedChat.senderRole.slice(0, 1)}</span><div><strong>{selectedChat.senderRole}</strong><small>{selectedChat.sender} · {selectedChat.sentAt}</small></div></header>
+                  <p className="project-teams-message">{selectedChat.message}</p>
+                  <small className="project-teams-related">関連資料: {scenario.projectDocuments.find((document) => document.id === selectedChat.relatedDocumentId)?.title ?? "資料なし"}</small>
+                  <h4>返信を選択</h4>
+                  <div className="project-teams-replies">{selectedChat.choices.map((choice) => <button
+                    className={selectedChatResponse?.choiceId === choice.id ? "selected" : ""}
+                    key={choice.id}
+                    onClick={() => sendChatReply(selectedChat.id, choice.id)}
+                  ><strong>{choice.label}</strong><small>{choice.response}</small></button>)}</div>
+                  {selectedChatChoice && <p className={`project-teams-sent ${selectedChatChoice.recommended ? "safe" : "risk"}`}>送信済みの回答: {selectedChatChoice.response}</p>}
+                </>
+                : <p className="project-empty">関係者を選択してください。</p>}
             </section>
           </div>
         </div>}
