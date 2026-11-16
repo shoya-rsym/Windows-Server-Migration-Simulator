@@ -57,6 +57,8 @@ import type {
   Advisor,
   HypothesisNote,
   ManagerApp,
+  ProjectDecisionEvidence,
+  ProjectDocument,
   ProjectWorkspace,
   RuntimeEnvironment,
   RuntimeEnvironments,
@@ -1428,12 +1430,28 @@ function ProjectDeskPanel({
   onRollback: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "investigation" | "plan" | "cutover">("overview");
+  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "plan" | "cutover">("overview");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDetail, setNoteDetail] = useState("");
   const [edgeFrom, setEdgeFrom] = useState("");
   const [edgeTo, setEdgeTo] = useState("");
+  const [selectedDocumentId, setSelectedDocumentId] = useState("");
+  const [selectedReviewId, setSelectedReviewId] = useState(scenario.decisionReviews[0]?.id ?? "");
+  const [evidenceDocumentId, setEvidenceDocumentId] = useState("");
+  const [evidenceSectionId, setEvidenceSectionId] = useState("");
+  const [decisionOption, setDecisionOption] = useState("");
+  const [decisionRationale, setDecisionRationale] = useState("");
   const update = (patch: Partial<ProjectWorkspace>) => onChange({ ...project, ...patch });
+  const selectedDocument = scenario.projectDocuments.find((document) => document.id === selectedDocumentId);
+  const selectedReview = scenario.decisionReviews.find((review) => review.id === selectedReviewId);
+  const citedDocument = scenario.projectDocuments.find((document) => document.id === evidenceDocumentId);
+
+  const openDocument = (document: ProjectDocument) => {
+    setSelectedDocumentId(document.id);
+    if (!project.readDocumentIds.includes(document.id)) {
+      update({ readDocumentIds: [...project.readDocumentIds, document.id] });
+    }
+  };
 
   const addNote = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1462,9 +1480,36 @@ function ProjectDeskPanel({
     setEdgeTo("");
   };
 
+  const saveDecisionEvidence = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const selectedOption = decisionOption.trim();
+    const rationale = decisionRationale.trim();
+    if (!selectedReview || !selectedOption || rationale.length < 20 || !citedDocument) return;
+    const section = citedDocument.sections.find((item) => item.id === evidenceSectionId);
+    if (!section) return;
+    const evidence: ProjectDecisionEvidence = {
+      id: `${selectedReview.id}:${Date.now()}`,
+      decisionId: selectedReview.id,
+      selectedOption,
+      rationale,
+      documentId: citedDocument.id,
+      sectionId: section.id,
+      createdAt: Date.now(),
+    };
+    update({
+      decisionEvidence: [
+        ...project.decisionEvidence.filter((item) => item.decisionId !== selectedReview.id),
+        evidence,
+      ],
+    });
+    setDecisionOption("");
+    setDecisionRationale("");
+  };
+
   const tabs: Array<{ id: typeof tab; label: string }> = [
     { id: "overview", label: "案件概要" },
     { id: "investigation", label: "調査・構成" },
+    { id: "documents", label: "案件資料・判断根拠" },
     { id: "plan", label: "計画・周知" },
     { id: "cutover", label: "切替判断" },
   ];
@@ -1496,6 +1541,62 @@ function ProjectDeskPanel({
             <h3>現在の作業記録</h3>
             <p>調査メモ {project.investigationNotes.length} 件 · 構成図 {project.architectureEdges.length} 接続 · 周知 {project.noticeSent ? "送信済み" : "未送信"}</p>
             <p>切替判断: {cutoverDecisionLabel(project.cutoverDecision)}</p>
+          </div>
+        </div>}
+
+        {tab === "documents" && <div className="project-tab-content">
+          <p className="project-intro">資料を読み、判断を記録してください。操作の実施だけでは根拠点は入りません。判断内容の選択自体に唯一の正解がない場合も、根拠の引用と論点の説明を評価します。</p>
+          <div className="project-columns project-document-workspace">
+            <section className="project-section">
+              <h3>案件資料 ({scenario.projectDocuments.length})</h3>
+              {scenario.projectDocuments.length === 0
+                ? <p className="project-empty">この案件には資料がありません。</p>
+                : <div className="project-document-list">{scenario.projectDocuments.map((document) =>
+                  <button
+                    className={selectedDocumentId === document.id ? "active" : ""}
+                    key={document.id}
+                    onClick={() => openDocument(document)}
+                  >
+                    <span><strong>{document.title}</strong><small>{document.category} · {document.author} · {document.receivedAt}</small></span>
+                    <em>{project.readDocumentIds.includes(document.id) ? "確認済み" : "未読"}</em>
+                  </button>,
+                )}</div>}
+              {selectedDocument && <article className="project-document-reader">
+                <header><small>{selectedDocument.category} · {selectedDocument.author} · {selectedDocument.receivedAt}</small><h4>{selectedDocument.title}</h4></header>
+                {selectedDocument.sections.map((section) => <section key={section.id}><strong>{section.title}</strong><p>{section.content}</p></section>)}
+              </article>}
+            </section>
+            <section className="project-section">
+              <h3>判断と根拠の記録</h3>
+              {scenario.decisionReviews.length === 0
+                ? <p className="project-empty">この案件には評価対象の判断項目がありません。</p>
+                : <form className="project-form" onSubmit={saveDecisionEvidence}>
+                  <label>判断テーマ<select value={selectedReviewId} onChange={(event) => {
+                    setSelectedReviewId(event.target.value);
+                    setEvidenceDocumentId("");
+                    setEvidenceSectionId("");
+                  }}>{scenario.decisionReviews.map((review) => <option value={review.id} key={review.id}>{review.title}</option>)}</select></label>
+                  {selectedReview && <p className="project-evidence-prompt">{selectedReview.prompt}</p>}
+                  <label>参照資料<select value={evidenceDocumentId} onChange={(event) => {
+                    const document = scenario.projectDocuments.find((item) => item.id === event.target.value);
+                    setEvidenceDocumentId(event.target.value);
+                    setEvidenceSectionId(document?.sections[0]?.id ?? "");
+                  }}><option value="">資料を選択</option>{(selectedReview?.relatedDocumentIds ?? []).map((documentId) => {
+                    const document = scenario.projectDocuments.find((item) => item.id === documentId);
+                    return document ? <option value={document.id} key={document.id}>{document.title}</option> : null;
+                  })}</select></label>
+                  <label>該当箇所<select value={evidenceSectionId} onChange={(event) => setEvidenceSectionId(event.target.value)}><option value="">セクションを選択</option>{citedDocument?.sections.map((section) => <option value={section.id} key={section.id}>{section.title}</option>)}</select></label>
+                  <label>採用する判断・選択肢<input value={decisionOption} onChange={(event) => setDecisionOption(event.target.value)} placeholder="例: 業務更新を停止してから最終同期する" /></label>
+                  <label>判断理由<textarea value={decisionRationale} onChange={(event) => setDecisionRationale(event.target.value)} rows={4} placeholder="資料の事実を引用し、判断理由・想定リスク・確認事項を説明してください。" /></label>
+                  <button className="project-primary-button" type="submit" disabled={!selectedReview || !decisionOption.trim() || decisionRationale.trim().length < 20 || !evidenceSectionId}>根拠を保存して評価</button>
+                </form>}
+              {project.decisionEvidence.length > 0 && <div className="project-record-list">{project.decisionEvidence.map((item) => {
+                const review = scenario.decisionReviews.find((candidate) => candidate.id === item.decisionId);
+                const document = scenario.projectDocuments.find((candidate) => candidate.id === item.documentId);
+                const section = document?.sections.find((candidate) => candidate.id === item.sectionId);
+                return <article key={item.id}><div><strong>{review?.title ?? item.decisionId}</strong><button onClick={() => update({ decisionEvidence: project.decisionEvidence.filter((entry) => entry.id !== item.id) })} aria-label={`${review?.title ?? item.decisionId}の根拠を削除`}><X size={13} /></button></div><p>判断: {item.selectedOption}<br />根拠: {document?.title ?? "資料なし"} / {section?.title ?? "箇所なし"}<br />{item.rationale}</p></article>;
+              })}</div>}
+            </section>
           </div>
         </div>}
 
@@ -1651,6 +1752,17 @@ function AuditReportModal({
           <div className="report-quality-heading"><h3>案件品質評価</h3><strong>総合評価: {report.overallGrade}</strong></div>
           <div className="report-quality-grid">{report.projectScores.map((item) => <article key={item.id}><small>{item.label}</small><strong>{item.score}<span>点</span></strong></article>)}</div>
         </section>
+        {report.evidenceReviews.length > 0 && <section className="report-evidence">
+          <h3>判断根拠レビュー</h3>
+          {report.evidenceReviews.map((review) => <article key={review.decisionId}>
+            <header><strong>{review.title}</strong><b>{review.score}点</b></header>
+            <p>{review.feedback}</p>
+            {review.citationValid && <small>資料の該当箇所を引用済み</small>}
+            {review.matchedPoints.length > 0 && <small>確認できた観点: {review.matchedPoints.join("・")}</small>}
+            {review.missingPoints.length > 0 && <small className="report-evidence-missing">不足する観点: {review.missingPoints.join("・")}</small>}
+          </article>)}
+          <p className="report-evidence-note">評価は案件資料の引用、理由の具体性、資料中の論点を含むかを確認するローカル規則です。自然言語の正しさをAIが判定するものではありません。</p>
+        </section>}
         {report.projectFindings.length > 0 && <section className="report-findings">
           <h3>案件運営の改善項目</h3>
           {report.projectFindings.map((finding) => <article key={finding.id}><strong>{finding.title}</strong><p>修正方法: {finding.remediation}</p></article>)}

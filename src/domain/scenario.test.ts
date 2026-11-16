@@ -37,4 +37,24 @@ describe("scenario integrity validation", () => {
 
     expect(() => loadScenario(invalidScenario)).toThrow("チュートリアルの完了イベントが見つかりません");
   });
+
+  it("rejects decision reviews that reference missing project documents", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    invalidScenario.decisionReviews[0].relatedDocumentIds = ["missing-document"];
+
+    expect(() => loadScenario(invalidScenario)).toThrow("判断評価に関連する案件資料がありません");
+  });
+
+  it("loads older scenario JSON without optional project documents", () => {
+    const {
+      projectDocuments: _projectDocuments,
+      decisionReviews: _decisionReviews,
+      ...legacyScenario
+    } = structuredClone(scenarioDefinition);
+
+    expect(loadScenario(legacyScenario)).toMatchObject({
+      projectDocuments: [],
+      decisionReviews: [],
+    });
+  });
 });

@@ -65,6 +65,24 @@ describe("simulation saves", () => {
     expect(parseSimulationSave({ ...legacySave, environments })).not.toBeNull();
   });
 
+  it("adds project-document fields when resuming older project workspace saves", () => {
+    const save = createSave();
+    const {
+      readDocumentIds: _readDocumentIds,
+      decisionEvidence: _decisionEvidence,
+      ...legacyProjectWorkspace
+    } = save.projectWorkspace;
+    const parsed = parseSimulationSave({
+      ...save,
+      projectWorkspace: legacyProjectWorkspace,
+    });
+
+    expect(parsed?.projectWorkspace).toMatchObject({
+      readDocumentIds: [],
+      decisionEvidence: [],
+    });
+  });
+
   it("rejects malformed nested runtime data instead of resuming it", () => {
     const save = createSave();
     const firstServerId = Object.keys(save.environments)[0];

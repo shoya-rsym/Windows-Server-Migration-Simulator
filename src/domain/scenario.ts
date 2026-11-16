@@ -65,6 +65,29 @@ const scenarioSchema = z.object({
       reason: z.string().min(1),
     })),
   }),
+  projectDocuments: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    category: z.string().min(1),
+    author: z.string().min(1),
+    receivedAt: z.string().min(1),
+    sections: z.array(z.object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      content: z.string().min(1),
+    })).min(1),
+  })).default([]),
+  decisionReviews: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    prompt: z.string().min(1),
+    relatedDocumentIds: z.array(z.string().min(1)).min(1),
+    evidencePoints: z.array(z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      anyTerms: z.array(z.string().min(1)).min(1),
+    })).min(1),
+  })).default([]),
   assets: z.object({
     servers: z.array(z.object({
       id: z.string(),
@@ -207,6 +230,23 @@ const scenarioSchema = z.object({
   addDuplicateIssues(scenario.assets.tasks.map((item) => item.id), context, ["assets", "tasks"], "タスクID");
   addDuplicateIssues(scenario.assets.certificates.map((item) => item.id), context, ["assets", "certificates"], "証明書ID");
   addDuplicateIssues(scenario.assets.configurationFiles.map((item) => item.id), context, ["assets", "configurationFiles"], "設定ファイルID");
+  addDuplicateIssues(scenario.projectDocuments.map((item) => item.id), context, ["projectDocuments"], "案件資料ID");
+  addDuplicateIssues(scenario.decisionReviews.map((item) => item.id), context, ["decisionReviews"], "判断評価ID");
+  scenario.projectDocuments.forEach((document, index) => {
+    addDuplicateIssues(document.sections.map((section) => section.id), context, ["projectDocuments", index, "sections"], "資料セクションID");
+  });
+  scenario.decisionReviews.forEach((review, index) => {
+    addDuplicateIssues(review.evidencePoints.map((point) => point.id), context, ["decisionReviews", index, "evidencePoints"], "判断根拠ID");
+    review.relatedDocumentIds.forEach((documentId) => {
+      if (!scenario.projectDocuments.some((document) => document.id === documentId)) {
+        context.addIssue({
+          code: "custom",
+          message: `判断評価に関連する案件資料がありません: ${documentId}`,
+          path: ["decisionReviews", index, "relatedDocumentIds"],
+        });
+      }
+    });
+  });
   addDuplicateIssues(scenario.project.components.map((component) => component.trim().toLowerCase()), context, ["project", "components"], "構成要素");
   addDuplicateIssues(scenario.project.dependencies.map((item) => item.id), context, ["project", "dependencies"], "依存関係ID");
   addDuplicateIssues(scenario.learningObjectives.map((item) => item.id), context, ["learningObjectives"], "学習目標ID");

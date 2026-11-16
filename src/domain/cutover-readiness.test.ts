@@ -12,6 +12,8 @@ function createProject(): ProjectWorkspace {
   return {
     investigationNotes: [],
     architectureEdges: [],
+    readDocumentIds: [],
+    decisionEvidence: [],
     plannedDowntimeMinutes: scenario.project.downtimeLimitMinutes,
     maintenanceWindow: scenario.project.downtimeWindow,
     ttlLeadDays: 0,

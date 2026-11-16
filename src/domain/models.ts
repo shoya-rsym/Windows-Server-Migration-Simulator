@@ -39,6 +39,43 @@ export interface ProjectBrief {
   dependencies: ProjectDependency[];
 }
 
+export interface ProjectDocumentSection {
+  id: string;
+  title: string;
+  content: string;
+}
+
+export interface ProjectDocument {
+  id: string;
+  title: string;
+  category: string;
+  author: string;
+  receivedAt: string;
+  sections: ProjectDocumentSection[];
+}
+
+export interface ProjectDecisionReview {
+  id: string;
+  title: string;
+  prompt: string;
+  relatedDocumentIds: string[];
+  evidencePoints: Array<{
+    id: string;
+    label: string;
+    anyTerms: string[];
+  }>;
+}
+
+export interface ProjectDecisionEvidence {
+  id: string;
+  decisionId: string;
+  selectedOption: string;
+  rationale: string;
+  documentId: string;
+  sectionId: string;
+  createdAt: number;
+}
+
 export interface InvestigationNote {
   id: string;
   title: string;
@@ -52,6 +89,8 @@ export type DatabaseMigrationStrategy = "expdp" | "rman" | "dataguard";
 export interface ProjectWorkspace {
   investigationNotes: InvestigationNote[];
   architectureEdges: Array<{ id: string; from: string; to: string }>;
+  readDocumentIds: string[];
+  decisionEvidence: ProjectDecisionEvidence[];
   plannedDowntimeMinutes: number;
   maintenanceWindow: string;
   ttlLeadDays: number;
@@ -192,6 +231,8 @@ export interface Scenario {
   title: string;
   description: string;
   project: ProjectBrief;
+  projectDocuments: ProjectDocument[];
+  decisionReviews: ProjectDecisionReview[];
   assets: {
     servers: Server[];
     vms: VM[];

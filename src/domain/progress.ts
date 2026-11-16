@@ -94,9 +94,20 @@ export interface AuditReport {
   recoveryMinutes: number | null;
   orderWarnings: string[];
   projectScores: Array<{ id: string; label: string; score: number }>;
+  evidenceReviews: ProjectEvidenceReview[];
   projectFindings: Array<{ id: string; title: string; remediation: string }>;
   overallGrade: string;
   review: string;
+}
+
+export interface ProjectEvidenceReview {
+  decisionId: string;
+  title: string;
+  score: number;
+  citationValid: boolean;
+  matchedPoints: string[];
+  missingPoints: string[];
+  feedback: string;
 }
 
 export interface CutoverReadinessItem {
@@ -118,7 +129,13 @@ export function getCutoverReadiness(
   const cycleCutoverIndex = cutoverIndex > rollbackIndex ? cutoverIndex : -1;
   const cycleEndIndex = cycleCutoverIndex >= 0 ? cycleCutoverIndex : events.length;
   const databaseSyncPending = Boolean(databaseRevisions && databaseRevisions.source > databaseRevisions.target);
-  const findings = new Set(getProjectFindings(scenario, events, project, databaseSyncPending).map((finding) => finding.id));
+  const findings = new Set(getProjectFindings(
+    scenario,
+    events,
+    project,
+    databaseSyncPending,
+    evaluateProjectEvidence(scenario, project),
+  ).map((finding) => finding.id));
   const migrationChangeIndex = events.reduce((latestIndex, event, index) =>
     index > rollbackIndex && index < cycleEndIndex && isCutoverPreflightInvalidator(event.name)
       ? index
@@ -346,6 +363,8 @@ export function calculateAuditReport(
   const project = projectWorkspace ?? {
     investigationNotes: [],
     architectureEdges: [],
+    readDocumentIds: [],
+    decisionEvidence: [],
     plannedDowntimeMinutes: scenario.project.downtimeLimitMinutes,
     maintenanceWindow: scenario.project.downtimeWindow,
     ttlLeadDays: 0,
@@ -359,8 +378,18 @@ export function calculateAuditReport(
   };
   const dataSyncPending = Boolean(databaseRevisions && databaseRevisions.source > databaseRevisions.target);
   const databaseMigrationComplete = hasCompletedDatabaseMigration(project.migrationStrategy, events);
-  const projectScores = calculateProjectScores(scenario, events, incidentCount, successRate, project, dataSyncPending, databaseMigrationComplete);
-  const projectFindings = getProjectFindings(scenario, events, project, dataSyncPending);
+  const evidenceReviews = evaluateProjectEvidence(scenario, project);
+  const projectScores = calculateProjectScores(
+    scenario,
+    events,
+    incidentCount,
+    successRate,
+    project,
+    dataSyncPending,
+    databaseMigrationComplete,
+    evidenceReviews,
+  );
+  const projectFindings = getProjectFindings(scenario, events, project, dataSyncPending, evidenceReviews);
   const averageScore = Math.round(projectScores.reduce((total, item) => total + item.score, 0) / projectScores.length);
   const overallGrade = gradeFor(averageScore);
   const review = buildReview(successRate, ttlMissed, missingTitles, orderWarnings, incidentCount, overallGrade, projectFindings);
@@ -374,10 +403,70 @@ export function calculateAuditReport(
     recoveryMinutes,
     orderWarnings,
     projectScores,
+    evidenceReviews,
     projectFindings,
     overallGrade,
     review,
   };
+}
+
+export function evaluateProjectEvidence(
+  scenario: Scenario,
+  project: ProjectWorkspace,
+): ProjectEvidenceReview[] {
+  return scenario.decisionReviews.map((review) => {
+    const evidence = project.decisionEvidence.find((item) => item.decisionId === review.id);
+    const document = evidence && scenario.projectDocuments.find((item) => item.id === evidence.documentId);
+    const citationValid = Boolean(
+      evidence
+      && document
+      && review.relatedDocumentIds.includes(document.id)
+      && project.readDocumentIds.includes(document.id)
+      && document.sections.some((section) => section.id === evidence.sectionId),
+    );
+    const rationale = normalize(evidence?.rationale ?? "");
+    const matchedPointIds = review.evidencePoints
+      .filter((point) => point.anyTerms.some((term) => rationale.includes(normalize(term))))
+      .map((point) => point.id);
+    const matchedPoints = review.evidencePoints
+      .filter((point) => matchedPointIds.includes(point.id))
+      .map((point) => point.label);
+    const missingPoints = review.evidencePoints
+      .filter((point) => !matchedPointIds.includes(point.id))
+      .map((point) => point.label);
+    const hasSpecificRationale = (evidence?.rationale.trim().length ?? 0) >= 40;
+    const hasSelectedOption = Boolean(evidence?.selectedOption.trim());
+    const pointScore = review.evidencePoints.length === 0
+      ? 0
+      : Math.round(matchedPoints.length / review.evidencePoints.length * 60);
+    const score = Math.min(100,
+      (citationValid ? 20 : 0)
+      + (hasSpecificRationale ? 15 : 0)
+      + (hasSelectedOption ? 5 : 0)
+      + pointScore,
+    );
+    const feedback = !evidence
+      ? "判断と根拠が未記録です"
+      : !citationValid
+        ? "関連資料と該当セクションを選び、資料を開いて確認してください"
+        : missingPoints.length > 0
+          ? `判断理由に資料上の論点を反映してください (${missingPoints.length}項目)`
+          : !hasSpecificRationale
+            ? "理由を具体的に記述してください"
+            : !hasSelectedOption
+              ? "採用する判断・選択肢を記入してください"
+              : "資料の引用と判断理由を確認しました";
+
+    return {
+      decisionId: review.id,
+      title: review.title,
+      score,
+      citationValid,
+      matchedPoints,
+      missingPoints,
+      feedback,
+    };
+  });
 }
 
 function calculateProjectScores(
@@ -388,11 +477,16 @@ function calculateProjectScores(
   project: ProjectWorkspace,
   dataSyncPending: boolean,
   databaseMigrationComplete: boolean,
+  evidenceReviews?: ProjectEvidenceReview[],
 ): AuditReport["projectScores"] {
   const eventNames = new Set(events.map((event) => event.name));
   const investigationEvents = events.filter((event) => event.name.startsWith("inspect:") || event.name.startsWith("investigate:"));
   const noteScore = Math.min(100, project.investigationNotes.filter((note) => note.title.trim() && note.detail.trim()).length * 34);
-  const researchScore = Math.round(noteScore * 0.7 + Math.min(100, investigationEvents.length * 25) * 0.3);
+  const documentScore = scenario.projectDocuments.length === 0
+    ? 100
+    : Math.round(scenario.projectDocuments.filter((document) => project.readDocumentIds.includes(document.id)).length
+      / scenario.projectDocuments.length * 100);
+  const researchScore = Math.round(noteScore * 0.5 + Math.min(100, investigationEvents.length * 25) * 0.2 + documentScore * 0.3);
   const expectedEdges = scenario.project.dependencies;
   const submittedEdges = project.architectureEdges;
   const matchingEdges = expectedEdges.filter((expected) => submittedEdges.some((actual) =>
@@ -424,10 +518,15 @@ function calculateProjectScores(
     + (project.cutoverDecision !== "pending" ? 10 : 0)
     + (eventNames.has("verify:task-run") ? 5 : 0)
     + (eventNames.has("verify:service-startup") ? 5 : 0);
+  const riskScore = scenario.decisionReviews.length === 0
+    ? 100
+    : Math.round((evidenceReviews ?? evaluateProjectEvidence(scenario, project))
+      .reduce((total, review) => total + review.score, 0) / scenario.decisionReviews.length);
 
   return [
     { id: "research", label: "調査品質", score: researchScore },
     { id: "design", label: "設計品質", score: designScore },
+    { id: "risk", label: "リスク管理・判断根拠", score: riskScore },
     { id: "migration", label: "移行品質", score: Math.max(0, migrationRate - (dataSyncPending ? 20 : 0) - (databaseMigrationComplete ? 0 : 20)) },
     { id: "incident", label: "障害対応", score: incidentResponseScore },
     { id: "security", label: "セキュリティ", score: securityScore },
@@ -461,6 +560,7 @@ function getProjectFindings(
   events: AuditEvent[],
   project: ProjectWorkspace,
   dataSyncPending: boolean,
+  evidenceReviews: ProjectEvidenceReview[],
 ): AuditReport["projectFindings"] {
   const findings: AuditReport["projectFindings"] = [];
   const capturedNotes = project.investigationNotes.filter((note) => note.title.trim() && note.detail.trim());
@@ -469,6 +569,14 @@ function getProjectFindings(
       id: "research-notes",
       title: "調査結果が案件ノートに記録されていません",
       remediation: "案件デスクの「調査・構成」で、調査したサーバー・バージョン・接続先と判断根拠を記録してください。",
+    });
+  }
+  const incompleteEvidenceReviews = evidenceReviews.filter((review) => review.score < 100);
+  if (incompleteEvidenceReviews.length > 0) {
+    findings.push({
+      id: "decision-evidence",
+      title: `判断根拠が十分でない項目が${incompleteEvidenceReviews.length}件あります`,
+      remediation: `${incompleteEvidenceReviews.slice(0, 3).map((review) => `${review.title}: ${review.feedback}`).join(" / ")}。案件デスクの「案件資料・判断根拠」で資料の該当箇所を引用し、判断理由を補ってください。`,
     });
   }
   const missingDependencies = scenario.project.dependencies.filter((expected) => !project.architectureEdges.some((actual) =>

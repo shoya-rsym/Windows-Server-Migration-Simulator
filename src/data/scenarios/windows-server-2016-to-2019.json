@@ -16,6 +16,139 @@
       { "id": "batch-db", "from": "定期バッチ", "to": "Oracle DB", "reason": "夜間バッチがDBを利用" }
     ]
   },
+  "projectDocuments": [
+    {
+      "id": "architecture-overview",
+      "title": "基幹業務システム 基本設計書",
+      "category": "基本設計書",
+      "author": "システム設計担当",
+      "receivedAt": "2026-10-12",
+      "sections": [
+        {
+          "id": "architecture-auth",
+          "title": "3.2 認証と利用者接続",
+          "content": "利用者は業務システムへ接続し、Active Directory (AD) のドメイン認証を利用する。APサーバーは認証要求をドメインコントローラーへ転送する。移行後も既存ドメイン、サービス実行アカウント、名前解決経路を維持すること。"
+        },
+        {
+          "id": "architecture-dataflow",
+          "title": "4.1 システム間接続",
+          "content": "業務FQDN intra.example.local はDNSのAレコードでAPサーバーを指す。APサーバーはJDBCを利用してOracle DBのORCLサービス (TCP 1521) に接続する。夜間の定期バッチも業務データをOracle DBへ登録する。"
+        }
+      ]
+    },
+    {
+      "id": "operations-manual",
+      "title": "本番運用手順書",
+      "category": "運用設計書",
+      "author": "運用チーム",
+      "receivedAt": "2026-10-18",
+      "sections": [
+        {
+          "id": "operations-window",
+          "title": "2.1 作業可能時間と停止制約",
+          "content": "業務停止の許容上限は120分。計画作業枠は22:00から24:00までとする。停止時間には最終データ同期、利用者ログイン、主要業務の確認を含める。枠を超える見込みがある場合は切替を開始しない。"
+        },
+        {
+          "id": "operations-batch",
+          "title": "5.3 夜間バッチ",
+          "content": "請求データ集計バッチは毎日23:30にAPSV01で実行され、Oracle DBへ書き込む。切替作業中に重複実行しないこと。移行先では実行ユーザー、スケジュール、出力先を確認し、切替前に試運転する。"
+        }
+      ]
+    },
+    {
+      "id": "migration-meeting-minutes",
+      "title": "移行判定会議 議事録",
+      "category": "会議議事録",
+      "author": "プロジェクトマネージャー",
+      "receivedAt": "2026-10-24",
+      "sections": [
+        {
+          "id": "meeting-database",
+          "title": "決定事項 1: DB移行と同期",
+          "content": "Data Pumpは論理エクスポート／インポート方式であり、継続的な更新同期ではない。RMANも取得後の更新は自動反映されない。方式を選ぶ際は停止可能時間、業務更新の停止タイミング、最終同期と整合性確認に必要な時間を計画へ含める。Data Guardを採用する場合も同期状態と切替条件を確認する。特定の方式を一律の正解とはしない。"
+        },
+        {
+          "id": "meeting-cutover",
+          "title": "決定事項 2: Go/No-Goと切戻し",
+          "content": "切替後30分以内に主要業務の確認が完了しない場合、またはデータ不整合が確認された場合は切戻しを判断する。Go判定では利用者周知、最終同期、DNS反映見込み、切戻し可能性を確認する。切戻し後はDNSキャッシュと旧環境の業務応答も確認する。"
+        }
+      ]
+    },
+    {
+      "id": "network-change-request",
+      "title": "ネットワーク変更依頼・回答",
+      "category": "変更依頼",
+      "author": "ネットワーク担当",
+      "receivedAt": "2026-10-26",
+      "sections": [
+        {
+          "id": "network-dns",
+          "title": "依頼 14: DNS TTLと切替",
+          "content": "intra.example.local の現在のTTLは86400秒。切替予定日の3日前までに300秒へ短縮し、旧TTLのキャッシュが残る期間を考慮してからAレコードを変更する。切替後は複数端末で名前解決先と業務接続を確認する。TTL変更とAレコード変更を同時に行わないこと。"
+        },
+        {
+          "id": "network-firewall",
+          "title": "回答 14: 通信許可",
+          "content": "移行先APから移行先OracleへのTCP 1521、および利用者から移行先APへの業務ポート通信を許可する。疎通確認は変更後に実施し、許可ルールだけをもって接続可能と判断しない。"
+        }
+      ]
+    }
+  ],
+  "decisionReviews": [
+    {
+      "id": "auth-continuity",
+      "title": "認証経路の継続性",
+      "prompt": "AD認証が移行後も成立することを、どの資料のどの記述から判断しましたか。移行時に維持・確認する対象を説明してください。",
+      "relatedDocumentIds": ["architecture-overview"],
+      "evidencePoints": [
+        { "id": "auth-ad", "label": "AD / ドメイン認証への依存を説明", "anyTerms": ["ad", "active directory", "ドメイン認証"] },
+        { "id": "auth-path", "label": "認証経路または実行アカウントの確認を説明", "anyTerms": ["認証経路", "ドメインコントローラー", "実行アカウント", "名前解決"] }
+      ]
+    },
+    {
+      "id": "database-strategy",
+      "title": "DB移行方式と最終同期",
+      "prompt": "選択したDB移行方式を記入し、停止可能時間・業務更新・最終同期の制約を踏まえて、その方式を採る理由と必要な確認を説明してください。単一の方式を正解とはしません。",
+      "relatedDocumentIds": ["migration-meeting-minutes", "operations-manual"],
+      "evidencePoints": [
+        { "id": "db-downtime", "label": "許容停止時間を考慮", "anyTerms": ["120分", "停止時間", "停止可能時間"] },
+        { "id": "db-writes", "label": "業務更新の停止・反映を考慮", "anyTerms": ["業務更新", "書き込み", "更新停止", "更新を止め"] },
+        { "id": "db-sync", "label": "最終同期と整合性確認を考慮", "anyTerms": ["最終同期", "同期状態", "整合性確認", "データ世代"] }
+      ]
+    },
+    {
+      "id": "downtime-plan",
+      "title": "停止時間の見積と作業枠",
+      "prompt": "計画停止時間が案件の許容範囲に収まるか、どの作業を見積に含めるかを根拠資料とともに説明してください。",
+      "relatedDocumentIds": ["operations-manual"],
+      "evidencePoints": [
+        { "id": "window-limit", "label": "120分と22:00-24:00の制約を説明", "anyTerms": ["120分", "22:00", "24:00", "停止上限"] },
+        { "id": "window-tasks", "label": "同期・業務確認など停止中作業を含める", "anyTerms": ["最終同期", "業務確認", "ログイン", "整合性"] }
+      ]
+    },
+    {
+      "id": "dns-cutover-plan",
+      "title": "DNS切替のタイミング",
+      "prompt": "TTLとAレコードの変更順序を決め、その理由と切替後の確認方法を説明してください。",
+      "relatedDocumentIds": ["network-change-request"],
+      "evidencePoints": [
+        { "id": "dns-ttl", "label": "TTLを事前に短縮し、旧値のキャッシュを考慮", "anyTerms": ["86400", "300秒", "3日前", "キャッシュ"] },
+        { "id": "dns-order", "label": "TTL短縮とAレコード変更を分ける", "anyTerms": ["同時に行わない", "先に", "短縮してから", "変更後"] },
+        { "id": "dns-verify", "label": "切替後に名前解決と業務接続を検証", "anyTerms": ["名前解決", "接続を確認", "複数端末", "業務接続"] }
+      ]
+    },
+    {
+      "id": "rollback-criteria",
+      "title": "切戻し判断条件",
+      "prompt": "いつ誰が切戻しを判断するか、判断条件と切戻し後に必要な確認を説明してください。",
+      "relatedDocumentIds": ["migration-meeting-minutes"],
+      "evidencePoints": [
+        { "id": "rollback-trigger", "label": "判断期限やデータ不整合など具体的条件", "anyTerms": ["30分", "不整合", "完了しない", "判断期限"] },
+        { "id": "rollback-action", "label": "旧環境へ戻す操作と連絡", "anyTerms": ["切戻し", "旧環境", "dns", "連絡"] },
+        { "id": "rollback-verify", "label": "キャッシュと旧環境の応答を再確認", "anyTerms": ["キャッシュ", "名前解決", "業務応答", "確認"] }
+      ]
+    }
+  ],
   "assets": {
     "servers": [
       { "id": "ap-old", "hostname": "APSV01", "role": "application", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },
