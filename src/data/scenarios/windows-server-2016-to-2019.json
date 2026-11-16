@@ -271,6 +271,50 @@
       ]
     }
   ],
+  "projectEffortPackages": [
+    {
+      "id": "current-state-investigation",
+      "title": "現行調査と構成把握",
+      "requiredEvents": ["inspect:os:source", "inspect:hostname:source", "inspect:java:source", "inspect:oracle:source", "inspect:oracle:target", "inspect:route:application:source", "inspect:route:database:source"],
+      "actualPersonHours": 12
+    },
+    {
+      "id": "planning-and-coordination",
+      "title": "資料確認・設計・関係者調整",
+      "requiredEvents": ["tutorial:investigation-notes-ready", "tutorial:architecture-ready", "tutorial:project-plan-ready", "project:notice-sent"],
+      "actualPersonHours": 14
+    },
+    {
+      "id": "target-platform-build",
+      "title": "移行先基盤・ミドルウェア構築",
+      "requiredEvents": ["install:middleware:ap-new:Java 8", "install:middleware:ap-new:Resin 4.0", "install:middleware:db-new:Oracle 19c", "start:oracle-service"],
+      "actualPersonHours": 18
+    },
+    {
+      "id": "database-migration",
+      "title": "DB移行と最終同期",
+      "requiredEvents": ["migrate:database", "migrate:jdbc"],
+      "actualPersonHours": 16
+    },
+    {
+      "id": "application-migration",
+      "title": "AP資産移行と起動確認",
+      "requiredEvents": ["migrate:services", "migrate:resin-config-validated", "migrate:tasks", "migrate:certificates", "start:resin-service"],
+      "actualPersonHours": 16
+    },
+    {
+      "id": "cutover-and-verification",
+      "title": "切替準備・本番切替・確認",
+      "requiredEvents": ["verify:service-startup", "verify:task-run", "verify:connectivity", "dns:ttl-lowered", "project:decision:go", "dns:cutover", "verify:post-cutover"],
+      "actualPersonHours": 12
+    },
+    {
+      "id": "incident-response",
+      "title": "障害調査・復旧",
+      "requiredEvents": ["investigate:events"],
+      "actualPersonHours": 6
+    }
+  ],
   "assets": {
     "servers": [
       { "id": "ap-old", "hostname": "APSV01", "role": "application", "stage": "source", "operatingSystem": "Windows Server 2016", "ipAddress": "10.10.1.21", "software": ["Java 8", "Resin 4.0", "intra-mart 11"], "vmIds": ["vm-ap-old"] },

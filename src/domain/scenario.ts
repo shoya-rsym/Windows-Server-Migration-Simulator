@@ -112,6 +112,12 @@ const scenarioSchema = z.object({
       recommended: z.boolean(),
     })).min(2),
   })).default([]),
+  projectEffortPackages: z.array(z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    requiredEvents: z.array(z.string().min(1)).min(1),
+    actualPersonHours: z.number().positive(),
+  })).default([]),
   assets: z.object({
     servers: z.array(z.object({
       id: z.string(),
@@ -258,6 +264,7 @@ const scenarioSchema = z.object({
   addDuplicateIssues(scenario.decisionReviews.map((item) => item.id), context, ["decisionReviews"], "判断評価ID");
   addDuplicateIssues(scenario.projectMails.map((item) => item.id), context, ["projectMails"], "案件メールID");
   addDuplicateIssues(scenario.projectChats.map((item) => item.id), context, ["projectChats"], "Teams会話ID");
+  addDuplicateIssues(scenario.projectEffortPackages.map((item) => item.id), context, ["projectEffortPackages"], "工数パッケージID");
   scenario.projectDocuments.forEach((document, index) => {
     addDuplicateIssues(document.sections.map((section) => section.id), context, ["projectDocuments", index, "sections"], "資料セクションID");
   });
@@ -291,6 +298,23 @@ const scenarioSchema = z.object({
       });
     }
     addDuplicateIssues(chat.choices.map((choice) => choice.id), context, ["projectChats", index, "choices"], "Teams返信ID");
+  });
+  const knownWorkflowEvents = new Set([
+    ...scenario.auditChecks.flatMap((check) => check.requiredEvents),
+    ...scenario.tutorialSteps.flatMap((step) => step.requiredEvents),
+    "project:decision:go",
+  ]);
+  scenario.projectEffortPackages.forEach((effortPackage, index) => {
+    addDuplicateIssues(effortPackage.requiredEvents, context, ["projectEffortPackages", index, "requiredEvents"], "工数イベント");
+    effortPackage.requiredEvents.forEach((event) => {
+      if (!knownWorkflowEvents.has(event)) {
+        context.addIssue({
+          code: "custom",
+          message: `工数見積の作業イベントが見つかりません: ${event}`,
+          path: ["projectEffortPackages", index, "requiredEvents"],
+        });
+      }
+    });
   });
   addDuplicateIssues(scenario.project.components.map((component) => component.trim().toLowerCase()), context, ["project", "components"], "構成要素");
   addDuplicateIssues(scenario.project.dependencies.map((item) => item.id), context, ["project", "dependencies"], "依存関係ID");

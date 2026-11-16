@@ -1245,6 +1245,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         {activeSidePanel === "project" && <ProjectDeskPanel
           scenario={scenario}
           project={projectWorkspace}
+          effortEstimate={auditReport.effortEstimate}
           dnsAddress={dns.address}
           cachedDnsAddress={dns.cachedAddress}
           sourceAddress={sourceApplication?.ipAddress ?? ""}
@@ -1405,6 +1406,7 @@ function DesktopHome({
 function ProjectDeskPanel({
   scenario,
   project,
+  effortEstimate,
   dnsAddress,
   cachedDnsAddress,
   sourceAddress,
@@ -1419,6 +1421,7 @@ function ProjectDeskPanel({
 }: {
   scenario: Scenario;
   project: ProjectWorkspace;
+  effortEstimate: ReturnType<typeof calculateAuditReport>["effortEstimate"];
   dnsAddress: string;
   cachedDnsAddress: string;
   sourceAddress: string;
@@ -1431,7 +1434,7 @@ function ProjectDeskPanel({
   onRollback: () => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "teams" | "plan" | "cutover">("overview");
+  const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "teams" | "effort" | "plan" | "cutover">("overview");
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDetail, setNoteDetail] = useState("");
   const [edgeFrom, setEdgeFrom] = useState("");
@@ -1444,6 +1447,10 @@ function ProjectDeskPanel({
   const [evidenceSectionId, setEvidenceSectionId] = useState("");
   const [decisionOption, setDecisionOption] = useState("");
   const [decisionRationale, setDecisionRationale] = useState("");
+  const [estimateHoursInput, setEstimateHoursInput] = useState(project.estimatedPersonHours?.toString() ?? "");
+  const [estimateRationaleInput, setEstimateRationaleInput] = useState(project.estimateRationale);
+  const [estimateDocumentId, setEstimateDocumentId] = useState(project.estimateDocumentId);
+  const [estimateSectionId, setEstimateSectionId] = useState(project.estimateSectionId);
   const update = (patch: Partial<ProjectWorkspace>) => onChange({ ...project, ...patch });
   const selectedDocument = scenario.projectDocuments.find((document) => document.id === selectedDocumentId);
   const selectedReview = scenario.decisionReviews.find((review) => review.id === selectedReviewId);
@@ -1452,6 +1459,7 @@ function ProjectDeskPanel({
   const selectedChatResponse = selectedChat && project.chatResponses.find((response) => response.threadId === selectedChat.id);
   const selectedChatChoice = selectedChat?.choices.find((choice) => choice.id === selectedChatResponse?.choiceId);
   const citedDocument = scenario.projectDocuments.find((document) => document.id === evidenceDocumentId);
+  const estimateDocument = scenario.projectDocuments.find((document) => document.id === estimateDocumentId);
 
   const openDocument = (document: ProjectDocument) => {
     setSelectedDocumentId(document.id);
@@ -1529,12 +1537,36 @@ function ProjectDeskPanel({
     setDecisionRationale("");
   };
 
+  const confirmEffortEstimate = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const hours = Number(estimateHoursInput);
+    const rationale = estimateRationaleInput.trim();
+    const section = estimateDocument?.sections.find((item) => item.id === estimateSectionId);
+    if (
+      !Number.isFinite(hours)
+      || hours <= 0
+      || rationale.length < 40
+      || !estimateDocument
+      || !project.readDocumentIds.includes(estimateDocument.id)
+      || !section
+      || project.estimateConfirmedAt !== null
+    ) return;
+    update({
+      estimatedPersonHours: hours,
+      estimateRationale: rationale,
+      estimateDocumentId: estimateDocument.id,
+      estimateSectionId: section.id,
+      estimateConfirmedAt: Date.now(),
+    });
+  };
+
   const tabs: Array<{ id: typeof tab; label: string }> = [
     { id: "overview", label: "案件概要" },
     { id: "investigation", label: "調査・構成" },
     { id: "documents", label: "案件資料・判断根拠" },
     { id: "mail", label: `メール (${scenario.projectMails.filter((mail) => mail.importance === "high" && !project.readMailIds.includes(mail.id)).length} 未読)` },
     { id: "teams", label: `Teams (${scenario.projectChats.filter((chat) => !project.chatResponses.some((response) => response.threadId === chat.id)).length} 未回答)` },
+    { id: "effort", label: "工数見積" },
     { id: "plan", label: "計画・周知" },
     { id: "cutover", label: "切替判断" },
   ];
@@ -1696,6 +1728,55 @@ function ProjectDeskPanel({
           </div>
         </div>}
 
+        {tab === "effort" && <div className="project-tab-content project-columns">
+          <section className="project-section">
+            <h3>案件規模と前提</h3>
+            <div className="project-brief-grid">
+              <article><small>利用者</small><strong>{scenario.project.users.toLocaleString()} 人</strong></article>
+              <article><small>APサーバー</small><strong>{scenario.assets.servers.filter((server) => server.role === "application").length} 台</strong></article>
+              <article><small>DBサーバー</small><strong>{scenario.assets.servers.filter((server) => server.role === "database").length} 台</strong></article>
+              <article><small>許容停止</small><strong>{scenario.project.downtimeLimitMinutes} 分</strong></article>
+            </div>
+            <p className="project-plan-note">技術作業だけでなく、調査・資料確認・関係者調整・テスト・切替・障害対応までを含む総人時を見積もります。見積前に案件資料を確認してください。</p>
+            <div className="project-effort-live">
+              <span>実施済み作業から算出したモデル実績</span>
+              <strong>{effortEstimate.actualPersonHours.toFixed(1)} 人時</strong>
+              {effortEstimate.variancePercent !== null && <small>見積差: {effortEstimate.variancePercent}% · 評価 {effortEstimate.score}点</small>}
+            </div>
+          </section>
+          <section className="project-section">
+            <h3>総工数を見積もる</h3>
+            {project.estimateConfirmedAt !== null
+              ? <>
+                <p>見積を確定しました。確定時刻: {new Date(project.estimateConfirmedAt).toLocaleString()}</p>
+                <div className="project-record-list"><article>
+                  <strong>見積: {project.estimatedPersonHours?.toFixed(1)} 人時</strong>
+                  <p>根拠資料: {scenario.projectDocuments.find((document) => document.id === project.estimateDocumentId)?.title ?? "資料なし"} / {scenario.projectDocuments.find((document) => document.id === project.estimateDocumentId)?.sections.find((section) => section.id === project.estimateSectionId)?.title ?? "箇所なし"}<br />{project.estimateRationale}</p>
+                  {!effortEstimate.recordedBeforeWork && <p className="project-risk">作業開始後の見積のため、正確性評価は制限されています。</p>}
+                </article></div>
+              </>
+              : <form className="project-form" onSubmit={confirmEffortEstimate}>
+                <label>総見積工数 (人時)<input type="number" min="0.5" step="0.5" value={estimateHoursInput} onChange={(event) => setEstimateHoursInput(event.target.value)} placeholder="例: 90" /></label>
+                <label>見積の参照資料<select value={estimateDocumentId} onChange={(event) => {
+                  const document = scenario.projectDocuments.find((item) => item.id === event.target.value);
+                  setEstimateDocumentId(event.target.value);
+                  setEstimateSectionId(document?.sections[0]?.id ?? "");
+                }}><option value="">資料を選択</option>{scenario.projectDocuments.map((document) => <option value={document.id} key={document.id}>{document.title}</option>)}</select></label>
+                <label>該当箇所<select value={estimateSectionId} onChange={(event) => setEstimateSectionId(event.target.value)}><option value="">セクションを選択</option>{estimateDocument?.sections.map((section) => <option value={section.id} key={section.id}>{section.title}</option>)}</select></label>
+                <label>見積の前提・根拠<textarea rows={4} value={estimateRationaleInput} onChange={(event) => setEstimateRationaleInput(event.target.value)} placeholder="含めた作業、担当者、停止枠、リスク対応など、見積の根拠を説明してください。" /></label>
+                <p className="project-plan-note">{estimateDocument && !project.readDocumentIds.includes(estimateDocument.id) ? "引用する資料を「案件資料・判断根拠」で開いてから確定してください。" : "見積は実作業開始前に確定します。確定後の修正はできません。"}</p>
+                <button className="project-primary-button" type="submit" disabled={
+                  Number(estimateHoursInput) <= 0
+                  || !Number.isFinite(Number(estimateHoursInput))
+                  || estimateRationaleInput.trim().length < 40
+                  || !estimateDocument
+                  || !project.readDocumentIds.includes(estimateDocument.id)
+                  || !estimateSectionId
+                }>見積を確定</button>
+              </form>}
+          </section>
+        </div>}
+
         {tab === "investigation" && <div className="project-tab-content project-columns">
           <section className="project-section">
             <h3>調査ノート</h3>
@@ -1848,6 +1929,12 @@ function AuditReportModal({
           <div className="report-quality-heading"><h3>案件品質評価</h3><strong>総合評価: {report.overallGrade}</strong></div>
           <div className="report-quality-grid">{report.projectScores.map((item) => <article key={item.id}><small>{item.label}</small><strong>{item.score}<span>点</span></strong></article>)}</div>
         </section>
+        {report.effortEstimate.estimatedPersonHours !== null && <section className="report-effort">
+          <strong>工数見積: {report.effortEstimate.estimatedPersonHours.toFixed(1)} 人時</strong>
+          <span>モデル実績: {report.effortEstimate.actualPersonHours.toFixed(1)} 人時</span>
+          <span>{report.effortEstimate.variancePercent === null ? "実績が蓄積するまで差分評価を保留します。" : `見積差 ${report.effortEstimate.variancePercent}% · 評価 ${report.effortEstimate.score}点`}</span>
+          <small>{report.effortEstimate.citationValid ? "根拠資料を引用済み" : "見積根拠資料の引用が不足しています"} · {report.effortEstimate.rationaleSpecific ? "根拠を具体的に記述" : "根拠の具体性が不足"} · {report.effortEstimate.recordedBeforeWork ? "作業開始前に記録" : "作業開始後の記録"}</small>
+        </section>}
         {report.evidenceReviews.length > 0 && <section className="report-evidence">
           <h3>判断根拠レビュー</h3>
           {report.evidenceReviews.map((review) => <article key={review.decisionId}>

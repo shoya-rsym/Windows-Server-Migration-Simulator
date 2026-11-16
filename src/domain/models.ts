@@ -92,6 +92,13 @@ export interface ProjectChatThread {
   }>;
 }
 
+export interface ProjectEffortPackage {
+  id: string;
+  title: string;
+  requiredEvents: string[];
+  actualPersonHours: number;
+}
+
 export interface ProjectDecisionEvidence {
   id: string;
   decisionId: string;
@@ -119,6 +126,11 @@ export interface ProjectWorkspace {
   readMailIds: string[];
   chatResponses: Array<{ threadId: string; choiceId: string; chosenAt: number }>;
   decisionEvidence: ProjectDecisionEvidence[];
+  estimatedPersonHours: number | null;
+  estimateRationale: string;
+  estimateDocumentId: string;
+  estimateSectionId: string;
+  estimateConfirmedAt: number | null;
   plannedDowntimeMinutes: number;
   maintenanceWindow: string;
   ttlLeadDays: number;
@@ -263,6 +275,7 @@ export interface Scenario {
   decisionReviews: ProjectDecisionReview[];
   projectMails: ProjectMailMessage[];
   projectChats: ProjectChatThread[];
+  projectEffortPackages: ProjectEffortPackage[];
   assets: {
     servers: Server[];
     vms: VM[];

@@ -51,6 +51,7 @@ describe("scenario integrity validation", () => {
       decisionReviews: _decisionReviews,
       projectMails: _projectMails,
       projectChats: _projectChats,
+      projectEffortPackages: _projectEffortPackages,
       ...legacyScenario
     } = structuredClone(scenarioDefinition);
 
@@ -59,6 +60,7 @@ describe("scenario integrity validation", () => {
       decisionReviews: [],
       projectMails: [],
       projectChats: [],
+      projectEffortPackages: [],
     });
   });
 
@@ -74,5 +76,12 @@ describe("scenario integrity validation", () => {
     invalidScenario.projectChats[0].relatedDocumentId = "missing-document";
 
     expect(() => loadScenario(invalidScenario)).toThrow("Teams会話に関連する資料がありません");
+  });
+
+  it("rejects effort packages with unknown workflow events", () => {
+    const invalidScenario = structuredClone(scenarioDefinition);
+    invalidScenario.projectEffortPackages[0].requiredEvents = ["migration:unknown-event"];
+
+    expect(() => loadScenario(invalidScenario)).toThrow("工数見積の作業イベントが見つかりません");
   });
 });

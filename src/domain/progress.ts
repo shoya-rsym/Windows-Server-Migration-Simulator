@@ -94,10 +94,21 @@ export interface AuditReport {
   recoveryMinutes: number | null;
   orderWarnings: string[];
   projectScores: Array<{ id: string; label: string; score: number }>;
+  effortEstimate: ProjectEffortEvaluation;
   evidenceReviews: ProjectEvidenceReview[];
   projectFindings: Array<{ id: string; title: string; remediation: string }>;
   overallGrade: string;
   review: string;
+}
+
+export interface ProjectEffortEvaluation {
+  estimatedPersonHours: number | null;
+  actualPersonHours: number;
+  variancePercent: number | null;
+  score: number;
+  citationValid: boolean;
+  rationaleSpecific: boolean;
+  recordedBeforeWork: boolean;
 }
 
 export interface ProjectEvidenceReview {
@@ -135,6 +146,7 @@ export function getCutoverReadiness(
     project,
     databaseSyncPending,
     evaluateProjectEvidence(scenario, project),
+    evaluateEffortEstimate(scenario, deriveTutorialEvents(events, scenario, project, []), events, project),
   ).map((finding) => finding.id));
   const migrationChangeIndex = events.reduce((latestIndex, event, index) =>
     index > rollbackIndex && index < cycleEndIndex && isCutoverPreflightInvalidator(event.name)
@@ -367,6 +379,11 @@ export function calculateAuditReport(
     readMailIds: [],
     chatResponses: [],
     decisionEvidence: [],
+    estimatedPersonHours: null,
+    estimateRationale: "",
+    estimateDocumentId: "",
+    estimateSectionId: "",
+    estimateConfirmedAt: null,
     plannedDowntimeMinutes: scenario.project.downtimeLimitMinutes,
     maintenanceWindow: scenario.project.downtimeWindow,
     ttlLeadDays: 0,
@@ -380,6 +397,8 @@ export function calculateAuditReport(
   };
   const dataSyncPending = Boolean(databaseRevisions && databaseRevisions.source > databaseRevisions.target);
   const databaseMigrationComplete = hasCompletedDatabaseMigration(project.migrationStrategy, events);
+  const effortEvents = deriveTutorialEvents(events, scenario, project, []);
+  const effortEstimate = evaluateEffortEstimate(scenario, effortEvents, events, project);
   const evidenceReviews = evaluateProjectEvidence(scenario, project);
   const projectScores = calculateProjectScores(
     scenario,
@@ -390,8 +409,16 @@ export function calculateAuditReport(
     dataSyncPending,
     databaseMigrationComplete,
     evidenceReviews,
+    effortEstimate,
   );
-  const projectFindings = getProjectFindings(scenario, events, project, dataSyncPending, evidenceReviews);
+  const projectFindings = getProjectFindings(
+    scenario,
+    events,
+    project,
+    dataSyncPending,
+    evidenceReviews,
+    effortEstimate,
+  );
   const averageScore = Math.round(projectScores.reduce((total, item) => total + item.score, 0) / projectScores.length);
   const overallGrade = gradeFor(averageScore);
   const review = buildReview(successRate, ttlMissed, missingTitles, orderWarnings, incidentCount, overallGrade, projectFindings);
@@ -405,6 +432,7 @@ export function calculateAuditReport(
     recoveryMinutes,
     orderWarnings,
     projectScores,
+    effortEstimate,
     evidenceReviews,
     projectFindings,
     overallGrade,
@@ -471,6 +499,66 @@ export function evaluateProjectEvidence(
   });
 }
 
+export function evaluateEffortEstimate(
+  scenario: Scenario,
+  modeledEvents: AuditEvent[],
+  actualEvents: AuditEvent[],
+  project: ProjectWorkspace,
+): ProjectEffortEvaluation {
+  if (scenario.projectEffortPackages.length === 0) {
+    return {
+      estimatedPersonHours: null,
+      actualPersonHours: 0,
+      variancePercent: null,
+      score: 100,
+      citationValid: false,
+      rationaleSpecific: false,
+      recordedBeforeWork: true,
+    };
+  }
+  const actualPersonHours = Number(scenario.projectEffortPackages.reduce((total, effortPackage) => {
+    const completed = effortPackage.requiredEvents.filter((requiredEvent) =>
+      lastEventIndex(modeledEvents, requiredEvent) >= 0,
+    ).length;
+    return total + effortPackage.actualPersonHours * completed / effortPackage.requiredEvents.length;
+  }, 0).toFixed(1));
+  const estimateDocument = scenario.projectDocuments.find((document) =>
+    document.id === project.estimateDocumentId,
+  );
+  const citationValid = Boolean(
+    project.estimateConfirmedAt !== null
+    && estimateDocument
+    && project.readDocumentIds.includes(estimateDocument.id)
+    && estimateDocument.sections.some((section) => section.id === project.estimateSectionId),
+  );
+  const rationaleSpecific = project.estimateRationale.trim().length >= 40;
+  const estimateEvents = new Set(scenario.projectEffortPackages.flatMap((item) => item.requiredEvents));
+  const firstWorkAt = actualEvents
+    .filter((event) => estimateEvents.has(event.name))
+    .reduce<number | null>((earliest, event) => earliest === null ? event.at : Math.min(earliest, event.at), null);
+  const recordedBeforeWork = firstWorkAt === null
+    || (project.estimateConfirmedAt !== null && project.estimateConfirmedAt <= firstWorkAt);
+  const estimatedPersonHours = project.estimateConfirmedAt === null ? null : project.estimatedPersonHours;
+  const variancePercent = estimatedPersonHours !== null && actualPersonHours > 0
+    ? Math.round(Math.abs(estimatedPersonHours - actualPersonHours) / actualPersonHours * 100)
+    : null;
+  let score = 0;
+  if (estimatedPersonHours !== null && variancePercent !== null) {
+    const accuracyScore = Math.max(0, 100 - Math.max(0, variancePercent - 10) / 40 * 100);
+    score = Math.round(accuracyScore * 0.7 + (citationValid ? 20 : 0) + (rationaleSpecific ? 10 : 0));
+    if (!recordedBeforeWork) score = Math.min(score, 50);
+  }
+  return {
+    estimatedPersonHours,
+    actualPersonHours,
+    variancePercent,
+    score,
+    citationValid,
+    rationaleSpecific,
+    recordedBeforeWork,
+  };
+}
+
 function calculateProjectScores(
   scenario: Scenario,
   events: AuditEvent[],
@@ -480,6 +568,7 @@ function calculateProjectScores(
   dataSyncPending: boolean,
   databaseMigrationComplete: boolean,
   evidenceReviews?: ProjectEvidenceReview[],
+  effortEstimate?: ProjectEffortEvaluation,
 ): AuditReport["projectScores"] {
   const eventNames = new Set(events.map((event) => event.name));
   const investigationEvents = events.filter((event) => event.name.startsWith("inspect:") || event.name.startsWith("investigate:"));
@@ -532,6 +621,7 @@ function calculateProjectScores(
       return score + (choice?.recommended ? 100 : 0);
     }, 0) / scenario.projectChats.length);
   const coordinationScore = Math.round((mailReviewScore + chatResponseScore) / 2);
+  const estimateScore = effortEstimate?.score ?? evaluateEffortEstimate(scenario, events, events, project).score;
   const riskScore = scenario.decisionReviews.length === 0
     ? 100
     : Math.round((evidenceReviews ?? evaluateProjectEvidence(scenario, project))
@@ -542,6 +632,7 @@ function calculateProjectScores(
     { id: "design", label: "設計品質", score: designScore },
     { id: "risk", label: "リスク管理・判断根拠", score: riskScore },
     { id: "coordination", label: "関係者調整", score: coordinationScore },
+    { id: "effort-estimate", label: "工数見積", score: estimateScore },
     { id: "migration", label: "移行品質", score: Math.max(0, migrationRate - (dataSyncPending ? 20 : 0) - (databaseMigrationComplete ? 0 : 20)) },
     { id: "incident", label: "障害対応", score: incidentResponseScore },
     { id: "security", label: "セキュリティ", score: securityScore },
@@ -576,6 +667,7 @@ function getProjectFindings(
   project: ProjectWorkspace,
   dataSyncPending: boolean,
   evidenceReviews: ProjectEvidenceReview[],
+  effortEstimate: ProjectEffortEvaluation,
 ): AuditReport["projectFindings"] {
   const findings: AuditReport["projectFindings"] = [];
   const capturedNotes = project.investigationNotes.filter((note) => note.title.trim() && note.detail.trim());
@@ -624,6 +716,26 @@ function getProjectFindings(
       id: "risky-stakeholder-reply",
       title: `関係者との合意にリスクが残っています (${riskyChatReplies.join("、")})`,
       remediation: "「Teams」の会話と根拠資料を読み直し、TTLの事前短縮、最終同期、停止枠、切戻し条件について関係者と安全な手順を合意してください。",
+    });
+  }
+  if (scenario.projectEffortPackages.length > 0
+    && (project.estimateConfirmedAt === null || effortEstimate.estimatedPersonHours === null)) {
+    findings.push({
+      id: "effort-estimate-missing",
+      title: "案件開始時の工数見積が記録されていません",
+      remediation: "作業を始める前にサーバー台数・利用者数・資料を確認し、総人時と見積根拠を案件デスクの「工数見積」に記録してください。",
+    });
+  } else if (!effortEstimate.recordedBeforeWork) {
+    findings.push({
+      id: "effort-estimate-late",
+      title: "工数見積が作業開始後に記録されています",
+      remediation: "実務では着手前の見積と実績を比較するため、次回は設計・構築作業の開始前に前提と見積を確定してください。",
+    });
+  } else if (effortEstimate.variancePercent !== null && effortEstimate.variancePercent > 20) {
+    findings.push({
+      id: "effort-estimate-variance",
+      title: `工数見積と実績の差が${effortEstimate.variancePercent}%あります`,
+      remediation: "過少・過大の両方を振り返り、調査、関係者調整、移行、テスト、切替、障害対応の前提と作業範囲を見直してください。",
     });
   }
   const missingDependencies = scenario.project.dependencies.filter((expected) => !project.architectureEdges.some((actual) =>

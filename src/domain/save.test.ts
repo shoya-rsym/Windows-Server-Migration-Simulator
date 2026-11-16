@@ -72,6 +72,11 @@ describe("simulation saves", () => {
       readMailIds: _readMailIds,
       chatResponses: _chatResponses,
       decisionEvidence: _decisionEvidence,
+      estimatedPersonHours: _estimatedPersonHours,
+      estimateRationale: _estimateRationale,
+      estimateDocumentId: _estimateDocumentId,
+      estimateSectionId: _estimateSectionId,
+      estimateConfirmedAt: _estimateConfirmedAt,
       ...legacyProjectWorkspace
     } = save.projectWorkspace;
     const parsed = parseSimulationSave({
@@ -84,6 +89,11 @@ describe("simulation saves", () => {
       readMailIds: [],
       chatResponses: [],
       decisionEvidence: [],
+      estimatedPersonHours: null,
+      estimateRationale: "",
+      estimateDocumentId: "",
+      estimateSectionId: "",
+      estimateConfirmedAt: null,
     });
   });
 
