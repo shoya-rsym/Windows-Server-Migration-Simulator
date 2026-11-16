@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import {
   Activity,
   AlertCircle,
@@ -184,6 +184,49 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   const [desktopServerId, setDesktopServerId] = useState(initialPanes[0]);
   const [reportOpen, setReportOpen] = useState(false);
   const [activeSidePanel, setActiveSidePanel] = useState<"knowledge" | "project" | "hypotheses" | null>(null);
+  const [projectDeskWidth, setProjectDeskWidth] = useState(500);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const projectDeskResizeStart = useRef<{ pointerId: number; clientX: number; width: number } | null>(null);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
+  const getProjectDeskWidthBounds = () => {
+    const workspaceWidth = workspaceRef.current?.clientWidth ?? viewportWidth;
+    return { min: 320, max: Math.max(320, Math.min(1100, viewportWidth - 400, workspaceWidth - 400)) };
+  };
+  const handleProjectDeskResizeStart = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    projectDeskResizeStart.current = { pointerId: event.pointerId, clientX: event.clientX, width: projectDeskWidth };
+  };
+  const handleProjectDeskResize = (event: PointerEvent<HTMLButtonElement>) => {
+    const start = projectDeskResizeStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const bounds = getProjectDeskWidthBounds();
+    const width = start.width + start.clientX - event.clientX;
+    setProjectDeskWidth(Math.max(bounds.min, Math.min(bounds.max, width)));
+  };
+  const stopProjectDeskResize = (event: PointerEvent<HTMLButtonElement>) => {
+    if (projectDeskResizeStart.current?.pointerId === event.pointerId) projectDeskResizeStart.current = null;
+  };
+  const handleProjectDeskResizeKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const bounds = getProjectDeskWidthBounds();
+    const step = event.shiftKey ? 72 : 18;
+    let width: number;
+    if (event.key === "ArrowLeft") width = projectDeskWidth + step;
+    else if (event.key === "ArrowRight") width = projectDeskWidth - step;
+    else if (event.key === "Home") width = bounds.min;
+    else if (event.key === "End") width = bounds.max;
+    else return;
+    event.preventDefault();
+    setProjectDeskWidth(Math.max(bounds.min, Math.min(bounds.max, width)));
+  };
+  const projectDeskWidthMax = getProjectDeskWidthBounds().max;
+  const workspaceStyle = { "--project-desk-width": `${projectDeskWidth}px` } as CSSProperties & { "--project-desk-width": string };
   const [guideFeedback, setGuideFeedback] = useState("");
   const [advisorFeedback, setAdvisorFeedback] = useState("");
   const [advisorLoading, setAdvisorLoading] = useState(false);
@@ -1047,7 +1090,11 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         </div>
       </header>
 
-      <div className={`lab-workspace ${activeSidePanel ? "has-side-panel" : ""}`}>
+      <div
+        ref={workspaceRef}
+        className={`lab-workspace ${activeSidePanel ? "has-side-panel" : ""} ${activeSidePanel === "project" ? "has-resizable-side-panel" : ""}`}
+        style={workspaceStyle}
+      >
       <main className="lab-main">
         <div className="workspace-title">
           <div><span className="workspace-eyebrow">REMOTE CONSOLE</span><h1>サーバーセッション</h1></div>
@@ -1241,6 +1288,23 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         {storageError && <p className="storage-warning" role="status">セーブエラー: {storageError}</p>}
         <footer className="lab-footer"><span>WINDOWS SERVER LAB <i /> {scenario.title}</span><button onClick={() => setScreen("desktop")}>Windowsデスクトップ</button></footer>
       </main>
+      {activeSidePanel === "project" && <button
+        type="button"
+        className="lab-panel-resize-handle"
+        role="separator"
+        aria-label="案件デスクの幅を変更"
+        aria-orientation="vertical"
+        aria-valuemin={320}
+        aria-valuemax={projectDeskWidthMax}
+        aria-valuenow={Math.min(projectDeskWidth, projectDeskWidthMax)}
+        aria-valuetext={`${Math.min(projectDeskWidth, projectDeskWidthMax)}ピクセル`}
+        onPointerDown={handleProjectDeskResizeStart}
+        onPointerMove={handleProjectDeskResize}
+        onPointerUp={stopProjectDeskResize}
+        onPointerCancel={stopProjectDeskResize}
+        onLostPointerCapture={stopProjectDeskResize}
+        onKeyDown={handleProjectDeskResizeKeyDown}
+      ><span aria-hidden="true" /></button>}
       {activeSidePanel && <aside className="lab-side-panel" aria-label="案件ツール">
         {activeSidePanel === "project" && <ProjectDeskPanel
           scenario={scenario}

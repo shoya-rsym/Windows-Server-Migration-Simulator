@@ -40,10 +40,15 @@ button:disabled { cursor: not-allowed; }
 .notes-toggle:hover,.notes-toggle.active { background: #f7faff; border-color: #c6d6ec; }
 .header-icon { display: grid; place-items: center; color: #8694a8; background: transparent; border: 0; padding: 5px; }
 .lab-workspace { width: min(1900px,100%); display: grid; grid-template-columns: minmax(0,1fr); align-items: start; margin: 0 auto; }
-.lab-workspace.has-side-panel { grid-template-columns: minmax(0,1fr) minmax(400px,500px); gap: 14px; padding-right: 14px; }
+.lab-workspace.has-side-panel:not(.has-resizable-side-panel) { grid-template-columns: minmax(0,1fr) minmax(400px,500px); gap: 14px; padding-right: 14px; }
+.lab-workspace.has-resizable-side-panel { grid-template-columns: minmax(0,1fr) 12px minmax(320px,min(var(--project-desk-width,500px),calc(100vw - 400px),1100px)); gap: 0 7px; padding-right: 14px; }
 .lab-main { width: 100%; max-width: 1600px; margin: 0 auto; padding: 25px 28px 18px; }
 .lab-workspace.has-side-panel .lab-main { min-width: 0; max-width: none; margin: 0; }
 .lab-side-panel { position: sticky; top: 12px; z-index: 1; max-height: calc(100vh - 24px); overflow: auto; margin: 12px 0; }
+.lab-panel-resize-handle { position: sticky; top: 12px; align-self: start; width: 12px; height: calc(100vh - 104px); min-height: 200px; display: grid; place-items: center; margin: 12px 0; padding: 0; color: #64758c; border: 0; background: transparent; cursor: col-resize; touch-action: none; user-select: none; }
+.lab-panel-resize-handle span { width: 4px; height: 48px; border-radius: 4px; background: #c5d0df; transition: width .12s,background-color .12s; }
+.lab-panel-resize-handle:hover span,.lab-panel-resize-handle:focus-visible span { width: 6px; background: #5487c5; }
+.lab-panel-resize-handle:focus-visible { outline: 2px solid #5487c5; outline-offset: -2px; }
 .lab-side-panel .workbench-panel { margin-top: 0; }
 .lab-side-panel .audit-report { width: 100%; max-height: calc(100vh - 24px); }
 .workspace-title { display: flex; justify-content: space-between; align-items: flex-end; gap: 14px; margin-bottom: 15px; }
@@ -284,13 +289,14 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
   .task-columns { grid-template-columns: minmax(0,1.3fr) minmax(48px,.65fr) minmax(56px,.75fr) minmax(50px,.6fr) minmax(37px,.4fr); gap: 4px; }
 }
 @media (max-width: 1150px) {
-  .lab-workspace.has-side-panel { grid-template-columns: minmax(0,1fr) minmax(340px,42vw); }
+  .lab-workspace.has-side-panel:not(.has-resizable-side-panel) { grid-template-columns: minmax(0,1fr) minmax(340px,42vw); }
   .lab-workspace.has-side-panel .session-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 800px) {
   .session-grid { grid-template-columns: 1fr; }
   .lab-workspace.has-side-panel { grid-template-columns: minmax(0,1fr); gap: 0; padding-right: 0; }
   .lab-workspace.has-side-panel .lab-side-panel { position: static; max-height: none; margin: 0 16px 12px; }
+  .lab-panel-resize-handle { display: none; }
   .lab-side-panel .audit-report { max-height: 80vh; }
 }
 @media (max-width: 620px) {
@@ -433,11 +439,16 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .lab-workspace .project-teams-sent.risk,.lab-workspace .project-meeting-minuted.risk { color: #94583f; }
 .lab-workspace .project-meeting-minuted:not(.risk) p { color: #3e7050; }
 .lab-side-panel .project-desk .project-tabs button:not(.active) { color: #526174; }
-.lab-side-panel .project-desk .project-tabs button { font-size: 11.3px; }
-.lab-side-panel .project-desk p { font-size: 11px; }
-.lab-side-panel .project-desk small { color: #526174; font-size: 10px; }
+.lab-side-panel .project-desk .project-tabs button { font-size: 12.5px; }
+.lab-side-panel .project-desk p { font-size: 12.5px; }
+.lab-side-panel .project-desk small { color: #526174; font-size: 11px; }
 .lab-side-panel .project-desk .project-meeting-minuted:not(.risk) small { color: #39744f; }
 .lab-side-panel .project-desk .project-meeting-minuted.risk small { color: #94583f; }
-.lab-side-panel .project-desk .project-plan-note { color: #526174 !important; font-size: 10px !important; }
-.lab-side-panel .project-desk .project-form label { font-size: 11px; }
-.lab-side-panel .project-desk .project-mail-toolbar span,.lab-side-panel .project-desk .project-teams-toolbar span,.lab-side-panel .project-desk .project-meeting-toolbar span,.lab-side-panel .project-desk .report-actions > span { color: #526174; }
+.lab-side-panel .project-desk .project-plan-note { color: #526174 !important; font-size: 11px !important; }
+.lab-side-panel .project-desk .project-form label { font-size: 12px; }
+.lab-side-panel .project-desk .project-form input,.lab-side-panel .project-desk .project-form select,.lab-side-panel .project-desk .project-form textarea { font-size: 12px; }
+.lab-side-panel .project-desk button { font-size: 12px; }
+.lab-side-panel .project-desk .project-chip-list span,.lab-side-panel .project-desk .project-edge-list > div,.lab-side-panel .project-desk .project-empty,.lab-side-panel .project-desk .project-record-list strong { font-size: 11px; }
+.lab-side-panel .project-desk .project-section h3 { font-size: 13.5px; }
+.lab-side-panel .project-desk .project-brief-grid strong,.lab-side-panel .project-desk .project-cutover-status strong { font-size: 13.5px; }
+.lab-side-panel .project-desk .project-mail-toolbar span,.lab-side-panel .project-desk .project-teams-toolbar span,.lab-side-panel .project-desk .project-meeting-toolbar span,.lab-side-panel .project-desk .report-actions > span { color: #526174; font-size: 10px; }
