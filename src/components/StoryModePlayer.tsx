@@ -49,7 +49,16 @@ export function StoryModePlayer({
   const quiz = enhancement?.quiz;
   const recommendedChoice = quiz?.choices.find((choice) => choice.correct);
   const playbackComplete = visibleActionCount >= actions.length;
-  const cardSide = focusRect && focusRect.left + focusRect.width / 2 < window.innerWidth / 2 ? "side-right" : "side-left";
+  const rightSpace = focusRect ? window.innerWidth - focusRect.left - focusRect.width - 14 : 0;
+  const leftSpace = focusRect ? focusRect.left - 14 : 0;
+  const cardSide = rightSpace >= leftSpace ? "side-right" : "side-left";
+  const cardMaxHeight = Math.min(window.innerHeight * 0.54, 560);
+  const cardTop = focusRect
+    ? Math.max(56, Math.min(focusRect.top, window.innerHeight - cardMaxHeight - 12))
+    : undefined;
+  const cardPositionStyle = cardTop === undefined || completedAt !== null || window.innerWidth <= 800
+    ? undefined
+    : { top: cardTop, bottom: "auto" };
 
   useEffect(() => {
     onStepChangeRef.current(step);
@@ -131,7 +140,7 @@ export function StoryModePlayer({
       setFailureOccurred(true);
       setFailureVisible(true);
     } else {
-      setQuizFeedback("推奨回答ではありません。選択肢を見直して、もう一度考えてみましょう。");
+      setQuizFeedback(choice.feedback ?? "推奨回答ではありません。選択肢を見直して、もう一度考えてみましょう。");
     }
   };
 
@@ -172,7 +181,7 @@ export function StoryModePlayer({
   if (failureVisible && enhancement?.failureBranch) {
     const failure = enhancement.failureBranch;
     overlayContent = (
-      <section className={`observation-card ${cardSide} observation-failure`} aria-live="polite">
+      <section className={`observation-card ${cardSide} observation-failure`} style={cardPositionStyle} aria-live="polite">
         <span className="observation-eyebrow">判断の結果を見てみましょう</span>
         <h1>{failure.title}</h1>
         <p className="observation-failure-impact">{failure.impact}</p>
@@ -224,7 +233,7 @@ export function StoryModePlayer({
     );
   } else {
     overlayContent = (
-      <section className={`observation-card ${cardSide}`} aria-live="polite">
+      <section className={`observation-card ${cardSide}`} style={cardPositionStyle} aria-live="polite">
         <div className="observation-step-heading">
           <span className="observation-eyebrow">チュートリアルを観察 · 手順 {stepIndex + 1} / {tutorialSteps.length}</span>
           <div className="observation-progress"><span style={{ width: `${((stepIndex + 1) / tutorialSteps.length) * 100}%` }} /></div>
@@ -243,10 +252,12 @@ export function StoryModePlayer({
             <div><strong>AI上司コメント</strong><p>{enhancement.aiComment}</p></div>
           </div>
         )}
-        {actions.length > 0 && (
+        {actions.length > 0 && !(focusTargetId.startsWith("console-") && actions.every((action) => action.command)) && (
           <section className="observation-action-playback" aria-label="操作の再生">
             <strong><span aria-hidden="true">&gt;_</span> 操作の再生</strong>
-            {actions.slice(0, visibleActionCount).map((action, index) => (
+            {actions.slice(0, visibleActionCount)
+              .filter((action) => !(focusTargetId.startsWith("console-") && action.command))
+              .map((action, index) => (
               <article key={`${step.id}-${index}`}>
                 <div><small>{action.actor}</small><b>{action.label}</b></div>
                 {action.command && <code>{action.command}</code>}

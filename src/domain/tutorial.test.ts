@@ -98,6 +98,49 @@ describe("tutorial workflow guidance", () => {
     expect(partialEvents.map((event) => event.name)).not.toContain("tutorial:architecture-ready");
   });
 
+  it("requires project documents, stakeholder decisions, minutes, and an estimate for their tutorial steps", () => {
+    const initialProject = createInitialProjectWorkspace(scenario.project);
+    const selectedMail = scenario.projectMails.find((mail) => mail.importance === "high");
+    const completeProject = {
+      ...initialProject,
+      readDocumentIds: scenario.projectDocuments.slice(0, 2).map((document) => document.id),
+      readMailIds: selectedMail ? [selectedMail.id] : [],
+      chatResponses: scenario.projectChats.map((chat) => ({
+        threadId: chat.id,
+        choiceId: chat.choices.find((choice) => choice.recommended)?.id ?? "",
+        chosenAt: 1,
+      })),
+      meetingRecords: scenario.projectMeetings.map((meeting) => ({
+        meetingId: meeting.id,
+        recordedAt: 1,
+        decisions: meeting.agendaItems.map((agendaItem) => ({
+          agendaItemId: agendaItem.id,
+          choiceId: agendaItem.choices.find((choice) => choice.recommended)?.id ?? "",
+        })),
+      })),
+      estimateConfirmedAt: 1,
+    };
+    const completeEvents = deriveTutorialEvents([], scenario, completeProject, []);
+    const incompleteEvents = deriveTutorialEvents([], scenario, initialProject, []);
+    const completeNames = completeEvents.map((event) => event.name);
+    const incompleteNames = incompleteEvents.map((event) => event.name);
+
+    expect(completeNames).toEqual(expect.arrayContaining([
+      "project:documents-reviewed",
+      "project:mail-reviewed",
+      "project:teams-aligned",
+      "project:meeting-recorded",
+      "project:effort-estimated",
+    ]));
+    expect(incompleteNames).not.toEqual(expect.arrayContaining([
+      "project:documents-reviewed",
+      "project:mail-reviewed",
+      "project:teams-aligned",
+      "project:meeting-recorded",
+      "project:effort-estimated",
+    ]));
+  });
+
   it("keeps the Resin migration step incomplete until a valid configuration is saved", () => {
     const resinStep = scenario.tutorialSteps.find((step) => step.id === "migrate-resin-config");
     if (!resinStep) throw new Error("Scenario does not define the Resin migration tutorial step.");

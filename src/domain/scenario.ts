@@ -5,6 +5,9 @@ const tutorialOnlyEvents = new Set([
   "inspect:hostname:source",
   "inspect:route:application:source",
   "inspect:route:database:source",
+  "inspect:dns:source",
+  "inspect:jdbc:source",
+  "inspect:resin-config:source",
   "verify:post-cutover",
   "project:notice-sent",
   "start:oracle-service",
@@ -12,6 +15,11 @@ const tutorialOnlyEvents = new Set([
   "tutorial:go-ready",
   "tutorial:investigation-notes-ready",
   "tutorial:architecture-ready",
+  "project:documents-reviewed",
+  "project:mail-reviewed",
+  "project:teams-aligned",
+  "project:meeting-recorded",
+  "project:effort-estimated",
 ]);
 
 function isTutorialOnlyEvent(event: string, scenario: Scenario): boolean {
@@ -65,6 +73,7 @@ const storyModeSchema = z.object({
         id: z.string().min(1),
         label: z.string().min(1),
         correct: z.boolean(),
+        feedback: z.string().min(1).optional(),
       })).min(2),
       answerExplanation: z.string().min(1),
     }).optional(),

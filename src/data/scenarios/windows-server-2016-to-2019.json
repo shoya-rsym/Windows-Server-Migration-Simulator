@@ -9,8 +9,23 @@
         "tutorialStepId": "inspect-os",
         "aiComment": "手順を覚える前に、まず「どの環境の何を確認しているか」を明確にしましょう。",
         "autoActions": [
-          { "label": "OS情報を確認", "actor": "APSV01", "command": "systeminfo", "output": ["OS Name: Microsoft Windows Server 2016 Standard", "OS Version: 10.0.14393"] },
-          { "label": "接続先を確認", "actor": "APSV01", "command": "hostname", "output": ["APSV01"] }
+          { "label": "OS情報を確認", "actor": "APSV01", "command": "systeminfo", "output": ["OS Name: Microsoft Windows Server 2016 Standard", "OS Version: 10.0.14393"] }
+        ],
+        "quiz": {
+          "question": "移行前に現行サーバーのOS情報を確認する主な理由は？",
+          "choices": [
+            { "id": "os-compatibility", "label": "移行先との互換性や必要なテストを判断する", "correct": true, "feedback": "OSの世代は、アプリやミドルウェアの互換性・テスト範囲の根拠になります。" },
+            { "id": "os-upgrade-now", "label": "現行サーバーをすぐアップグレードする", "correct": false, "feedback": "移行前調査は現行の事実を記録する工程です。変更は影響と計画を確認してから行います。" },
+            { "id": "os-no-record", "label": "サーバー名だけ分かればOSは記録しなくてよい", "correct": false, "feedback": "OS差分が互換性や必要な検証に影響するため、記録が必要です。" }
+          ],
+          "answerExplanation": "OS・ホスト名・ミドルウェアの現行値を記録し、新環境との差分から互換性確認やテストを決めます。"
+        }
+      },
+      {
+        "tutorialStepId": "inspect-hostname",
+        "aiComment": "作業対象を取り違えると、正しい操作でも別環境を変更してしまいます。コマンド結果と接続先表示を照合します。",
+        "autoActions": [
+          { "label": "接続先ホスト名を確認", "actor": "APSV01", "command": "hostname", "output": ["APSV01"] }
         ]
       },
       {
@@ -18,7 +33,144 @@
         "aiComment": "「Java 17に上げる」より先に、アプリがJava 8以外で動く根拠を調べます。",
         "autoActions": [
           { "label": "Javaバージョンを確認", "actor": "APSV01", "command": "java -version", "output": ["java version \"1.8.0_202\"", "Java SE Runtime Environment (build 1.8.0_202-b08)"] }
-        ]
+        ],
+        "quiz": {
+          "question": "現行APのJavaが8と分かった後、移行先のJavaを決める前に必要なことは？",
+          "choices": [
+            { "id": "java-compatibility", "label": "アプリ・Resin・ライブラリの互換性とテスト結果を確認する", "correct": true, "feedback": "現行バージョンを基準に、アプリと実行基盤をまとめて検証します。" },
+            { "id": "java-latest", "label": "常に最新Javaへ上げる", "correct": false, "feedback": "新しいJavaが既存アプリやResinで動くとは限りません。互換性の根拠が必要です。" },
+            { "id": "java-ignore", "label": "Javaの差はOS移行と無関係なので調べない", "correct": false, "feedback": "Java差はアプリケーションの起動やライブラリ動作に影響します。" }
+          ],
+          "answerExplanation": "現行のJava 8を基準に、アプリ・Resin・ライブラリのサポート状況と実機テストの結果で移行先を判断します。"
+        }
+      },
+      {
+        "tutorialStepId": "inspect-oracle-source",
+        "aiComment": "DBの製品名だけでは判断できません。バージョン、サービス名、Listenerの状態を実際の出力で確認します。",
+        "autoActions": [
+          { "label": "現行DBのListenerを確認", "actor": "DBSV01", "command": "lsnrctl status", "output": ["LSNRCTL for Oracle 11g - Production", "STATUS of the LISTENER", "Instance status READY"] }
+        ],
+        "quiz": {
+          "question": "lsnrctl status の確認で分かることは？",
+          "choices": [
+            { "id": "listener-endpoint", "label": "Listenerの稼働状態と接続を受け付けるサービス", "correct": true, "feedback": "Listenerの状態と登録サービスを確認するコマンドです。" },
+            { "id": "listener-schema-data", "label": "全テーブルのデータが移行済みかどうか", "correct": false, "feedback": "データ移行の完了は別途、移行結果やデータ世代を照合して確認します。" },
+            { "id": "listener-os-version", "label": "WindowsのOS更新が完了したかどうか", "correct": false, "feedback": "ListenerはOracleの接続受付を確認するもので、OS更新状態は示しません。" }
+          ],
+          "answerExplanation": "Listener状態と登録サービスを確認し、DBがクライアント接続を受け付けられるかを調べます。データ内容の一致は別の確認が必要です。"
+        }
+      },
+      {
+        "tutorialStepId": "inspect-dns-record",
+        "aiComment": "DNS名だけでなく、現在の名前解決先を記録しておくと、切替前後の差分を確認できます。",
+        "autoActions": [
+          { "label": "本番名の名前解決を確認", "actor": "APSV01", "command": "nslookup intra.example.local", "output": ["Name: intra.example.local", "Address: 10.10.1.21"] }
+        ],
+        "quiz": {
+          "question": "DNS切替前に nslookup の結果を記録しておく理由は？",
+          "choices": [
+            { "id": "dns-baseline", "label": "現行の名前解決先と切替後の結果を比較する", "correct": true, "feedback": "切替前の値があれば、変更反映やキャッシュ残留を見分けやすくなります。" },
+            { "id": "dns-db-copy", "label": "DNS結果だけでDBデータ移行が完了したと判断する", "correct": false, "feedback": "DNSは接続先の名前解決を確認するもので、DBデータの状態は示しません。" },
+            { "id": "dns-ttl-ignore", "label": "名前解決先が分かればTTLは確認しなくてよい", "correct": false, "feedback": "TTLは旧アドレスのキャッシュが残る時間に関わります。" }
+          ],
+          "answerExplanation": "切替前のAレコードと応答を記録し、切替後に権威DNSの変更とクライアント側キャッシュの状態を分けて確認します。"
+        }
+      },
+      {
+        "tutorialStepId": "inspect-application-config",
+        "aiComment": "アプリの接続先は、JDBCだけでなくResin設定にも記述される場合があります。両方を照合します。",
+        "autoActions": [
+          { "label": "JDBCとResin設定を表示", "actor": "APSV01", "command": "type jdbc.properties / type resin.conf", "output": ["jdbc.url=jdbc:oracle:thin:@DBSV01:1521:ORCL", "listen-address=10.10.1.21", "db-url=DBSV01:1521:ORCL"] }
+        ],
+        "quiz": {
+          "question": "APからDBへの接続関係を調べるとき、確認すべき組み合わせは？",
+          "choices": [
+            { "id": "config-both", "label": "JDBC URLとResin設定のDB接続先を照合する", "correct": true, "feedback": "両方の設定に旧接続先が残っていないか確認します。" },
+            { "id": "config-only-dns", "label": "DNSのAレコードだけを見てDB接続先も決める", "correct": false, "feedback": "DNSは業務名の名前解決情報で、JDBCやResinのDB接続先とは別です。" },
+            { "id": "config-only-hostname", "label": "APのホスト名だけで接続先DBを判断する", "correct": false, "feedback": "接続先DBはアプリ設定ファイルの値で確認します。" }
+          ],
+          "answerExplanation": "JDBC URLとResinのDB接続設定を実際に確認し、ホスト・ポート・サービス名が一致するか記録します。"
+        }
+      },
+      {
+        "tutorialStepId": "review-project-documents",
+        "aiComment": "設計書は読むだけでなく、停止制約や認証方式など後続判断に使う事実を拾います。",
+        "autoActions": [
+          { "label": "基本設計書・運用設計書を確認", "actor": "案件担当者", "output": ["利用者数・停止可能時間・認証方式・定期バッチを確認", "重要な記載は資料名と章を根拠として記録"] }
+        ],
+        "quiz": {
+          "question": "設計書に利用者1,200人・停止上限120分と記載されています。まず行うべきことは？",
+          "choices": [
+            { "id": "docs-constraints", "label": "制約として記録し、方式・工数・テスト計画の判断に使う", "correct": true, "feedback": "案件条件を計画や関係者調整の根拠として活用します。" },
+            { "id": "docs-ignore", "label": "資料の数値は古い可能性があるので無視する", "correct": false, "feedback": "資料の鮮度に疑義があれば、無視せず作成者や顧客へ確認します。" },
+            { "id": "docs-copy", "label": "その数値だけで移行方式を決め、追加確認を省略する", "correct": false, "feedback": "利用者数と停止枠は重要ですが、更新量・依存関係・復旧条件も確認が必要です。" }
+          ],
+          "answerExplanation": "利用者数や停止時間を制約として記録し、更新量・依存関係・リハーサル結果と合わせて方式や作業計画を判断します。"
+        }
+      },
+      {
+        "tutorialStepId": "review-project-mail",
+        "aiComment": "メールは資料の補足や未完了の依頼を含みます。受信した事実を作業完了と取り違えないようにします。",
+        "autoActions": [
+          { "label": "NW担当からのDNS依頼メールを確認", "actor": "案件担当者", "output": ["TTL短縮申請が未提出であることを確認", "切替前に変更完了とキャッシュ満了見込みを確認"] }
+        ],
+        "quiz": {
+          "question": "TTL短縮申請が未提出というメールを受け取ったら、どうするべきですか？",
+          "choices": [
+            { "id": "mail-follow-up", "label": "担当者と期限を確認し、完了を確認するまで切替判断に反映する", "correct": true, "feedback": "依頼を送っただけでなく、変更完了と反映時期を確認します。" },
+            { "id": "mail-assume", "label": "メールを送ったので変更済みとみなす", "correct": false, "feedback": "申請の送信は変更完了の証拠ではありません。完了報告と状態確認が必要です。" },
+            { "id": "mail-cutover", "label": "作業当日にTTLとAレコードを同時に変更する", "correct": false, "feedback": "既存キャッシュはその場で消えないため、TTL短縮の時期も計画します。" }
+          ],
+          "answerExplanation": "TTL変更の担当・期限・適用結果と旧TTLキャッシュの満了見込みを確認し、未完了なら切替を再判断します。"
+        }
+      },
+      {
+        "tutorialStepId": "review-project-teams",
+        "aiComment": "技術担当との合意や未完了事項をチャットで確認し、責任者と期限を明確にします。",
+        "autoActions": [
+          { "label": "NW担当・DBAの会話を確認", "actor": "案件担当者", "output": ["通信許可と最終同期の前提を確認", "未完了事項をGo/No-Goの条件へ反映"] }
+        ],
+        "quiz": {
+          "question": "NW担当から「Firewall申請がまだ」と連絡がありました。適切な対応は？",
+          "choices": [
+            { "id": "teams-confirm", "label": "担当・期限を確認し、通信テスト完了まで切替前提を未完了として扱う", "correct": true, "feedback": "未完了の技術依存を記録し、疎通確認まで切替条件に含めます。" },
+            { "id": "teams-assume", "label": "他の担当者が申請したと考えて、そのまま進める", "correct": false, "feedback": "推測で未完了事項を閉じず、担当者と完了証跡を確認します。" },
+            { "id": "teams-skip-test", "label": "作業当日に初めて接続確認する", "correct": false, "feedback": "切替前に必要な通信を確認し、問題があれば計画を再調整します。" }
+          ],
+          "answerExplanation": "未完了事項の担当者・期限・検証方法を合意し、Firewallの変更と接続テストをGo/No-Goの根拠にします。"
+        }
+      },
+      {
+        "tutorialStepId": "review-project-meeting",
+        "aiComment": "会議の決定事項は作業計画へ反映し、担当者間で異なる前提が残らないよう議事録にします。",
+        "autoActions": [
+          { "label": "移行判定会議の議題・決定条件を確認", "actor": "案件担当者", "output": ["切戻し判断期限と最終同期の条件を確認", "計画書の停止時間・切戻し手順と整合させる"] }
+        ],
+        "quiz": {
+          "question": "会議の合意は切戻し30分以内、作業計画は切戻し3時間です。どう対応しますか？",
+          "choices": [
+            { "id": "meeting-align", "label": "影響を整理し、合意を得て計画を修正してから確定する", "correct": true, "feedback": "会議の決定と作業計画の不一致は、関係者合意のもとで解消します。" },
+            { "id": "meeting-ignore", "label": "作業計画を優先し、会議の決定は記録しない", "correct": false, "feedback": "合意事項を無視すると、判断基準が関係者間で食い違います。" },
+            { "id": "meeting-assume", "label": "切戻し時間の違いは実作業に影響しないので放置する", "correct": false, "feedback": "切戻し時間は停止枠とGo/No-Goの判断に直結します。" }
+          ],
+          "answerExplanation": "合意された判断期限と計画の差分を関係者に提示し、実現可能な手順・時間へ修正して再合意します。"
+        }
+      },
+      {
+        "tutorialStepId": "review-project-effort",
+        "aiComment": "工数はコマンド実行時間だけではありません。調査・調整・リハーサル・検証・切戻し準備も含めます。",
+        "autoActions": [
+          { "label": "総工数と見積根拠を確認", "actor": "案件担当者", "output": ["技術作業・資料調査・関係者調整・試験・切替・切戻しを対象にする", "見積値だけでなく、参照資料と前提を記録する"] }
+        ],
+        "quiz": {
+          "question": "移行案件の工数見積に含めるべき作業は？",
+          "choices": [
+            { "id": "effort-full-scope", "label": "調査・調整・リハーサル・検証・切替・切戻し準備", "correct": true, "feedback": "技術作業以外の調整・検証・復旧準備も工数と担当を見積もります。" },
+            { "id": "effort-command-only", "label": "サーバーへコマンドを入力する時間だけ", "correct": false, "feedback": "調査、承認、試験、利用者周知、切戻し準備などが漏れます。" },
+            { "id": "effort-round-down", "label": "作業時間を短く見せるため、予備時間をすべて除外する", "correct": false, "feedback": "前提やリスク対応を明示し、根拠のない切り詰めを避けます。" }
+          ],
+          "answerExplanation": "技術作業に加え、調査・資料確認・関係者調整・リハーサル・切替後確認・切戻し準備を根拠とともに見積もります。"
+        }
       },
       {
         "tutorialStepId": "migrate-database",
@@ -516,8 +668,15 @@
     { "id": "inspect-os", "instruction": "APSV01 の CMD で systeminfo を実行し、Windows Server のバージョンを確認してください。左ペインの接続先が APSV01 であることも確認します。", "requiredEvents": ["inspect:os:source"], "explanation": "OSの世代は、移行先の互換性や必要なテストを決める基礎情報です。" },
     { "id": "inspect-hostname", "instruction": "続けて hostname を実行し、操作対象が APSV01 であることを確認してください。", "requiredEvents": ["inspect:hostname:source"], "explanation": "ホスト名はDNS・証明書・接続設定に使われます。操作対象を取り違えないため、作業前に確認します。" },
     { "id": "inspect-java", "instruction": "APSV01 の CMD で java -version を実行し、現行Javaのバージョンを確認してください。", "requiredEvents": ["inspect:java:source"], "explanation": "新APのJavaとアプリケーションの互換性を判断するため、新旧の実行環境を比較します。" },
-    { "id": "inspect-oracle-source", "instruction": "接続先を DBSV01 にして SQL*Plus を開き、OracleのバージョンとListener状態を確認してください。", "requiredEvents": ["inspect:oracle:source"], "explanation": "現行Oracleの状態は、移行先のバージョンやデータ移行方式を決める基準になります。" },
+    { "id": "inspect-oracle-source", "instruction": "接続先を DBSV01 にしてCMDを開き、lsnrctl status を実行してOracleのバージョンとListener状態を確認してください。", "requiredEvents": ["inspect:oracle:source"], "explanation": "現行Oracleの状態は、移行先のバージョンやデータ移行方式を決める基準になります。" },
     { "id": "inspect-network-routes", "instruction": "APSV01 と DBSV01 の各セッションで route print を実行してください。各出力のInterface欄が、そのセッションのサーバーIPになっていることを確認します。", "requiredEvents": ["inspect:route:application:source", "inspect:route:database:source"], "explanation": "route print は実行したサーバーの経路表を表示します。APとDBのInterface欄を比べると、同じサブネット内の別ホストであることを確認できます。" },
+    { "id": "inspect-dns-record", "instruction": "APSV01 のCMDで nslookup intra.example.local を実行し、名前解決先が現在のAPSV01 (10.10.1.21) であることを確認してください。", "requiredEvents": ["inspect:dns:source"], "explanation": "DNSのAレコードと応答結果を切替前に記録すると、変更後の反映や旧キャッシュの残存を確認できます。" },
+    { "id": "inspect-application-config", "instruction": "APSV01 のCMDで type jdbc.properties と type resin.conf を実行し、JDBC URLとResin設定に記載されたDB接続先を確認してください。", "requiredEvents": ["inspect:jdbc:source", "inspect:resin-config:source"], "explanation": "接続元APの設定からDBのホスト・ポート・サービス名を照合し、どのサーバー間に依存関係があるか調べます。" },
+    { "id": "review-project-documents", "instruction": "案件デスクの「案件資料・判断根拠」で基本設計書と運用設計書を読み、利用者数・停止上限・認証方式・定期バッチなどの制約を確認してください。少なくとも2件の資料を開きます。", "requiredEvents": ["project:documents-reviewed"], "explanation": "技術調査だけでは分からない業務条件や運用制約を設計書から拾い、資料名と章を後続の判断根拠にします。" },
+    { "id": "review-project-mail", "instruction": "案件デスクの「メール」で、特に重要メールを読みます。TTL短縮申請や作業枠について未完了の依頼があれば、担当者・期限・完了確認を切替計画へ反映してください。", "requiredEvents": ["project:mail-reviewed"], "explanation": "依頼を送信したことと変更が完了したことは別です。メールの未完了事項を確認し、切替条件や担当者調整へ反映します。" },
+    { "id": "review-project-teams", "instruction": "案件デスクの「Teams」でNW担当やDBAの会話を確認し、未完了の通信許可や最終同期について担当者・期限をそろえる返信を選んでください。", "requiredEvents": ["project:teams-aligned"], "explanation": "担当間の認識差や保留中の作業を表面化し、完了条件と検証方法を合意してから進めます。" },
+    { "id": "review-project-meeting", "instruction": "案件デスクの「会議・議事録」で移行判定会議の議題を確認し、合意内容に沿って判断を選び、議事録を確定してください。計画の切戻し条件とも照合します。", "requiredEvents": ["project:meeting-recorded"], "explanation": "会議の決定を記録し、切戻し期限や最終同期の条件が作業計画と矛盾していないか確認します。" },
+    { "id": "review-project-effort", "instruction": "案件デスクの「工数見積」で、調査・調整・リハーサル・試験・切替・切戻し準備を含む総工数を、確認済み資料の根拠とともに見積もってください。", "requiredEvents": ["project:effort-estimated"], "explanation": "コマンド操作だけでなく、関係者調整やリハーサル、検証、切戻し準備を含めて見積もり、根拠資料と前提を残します。" },
     { "id": "record-investigation-notes", "instruction": "案件デスクの「調査・構成」で、調査したAP・DB・ネットワークについて、タイトルと根拠を含むノートを3件以上記録してください。これが最終評価の調査品質に反映されます。", "requiredEvents": ["tutorial:investigation-notes-ready"], "explanation": "調査コマンドを実行するだけでなく、ホスト名・OS・ミドルウェア・接続先などの根拠を案件記録に残すと、後続の設計や切替判断を追跡できます。" },
     { "id": "map-architecture", "instruction": "案件デスクの「調査・構成」にある「接続関係の調べ方」を参照してください。確認した資料やコマンドを根拠に、利用者→AD認証→AP、DNS→AP、AP→Oracle DB、定期バッチ→Oracle DBの接続を登録します。AD画面やバッチスクリプトなどMVPで確認できない項目は、案件要件を根拠に記録し、実案件では担当者へ確認します。", "requiredEvents": ["tutorial:architecture-ready"], "explanation": "構成図は推測だけで描かず、DNSレコード、JDBC/resin.conf、タスク設定、案件要件など確認元を明記します。MVPにないAD管理画面やバッチスクリプトは、未確認であることも記録してください。" },
     { "id": "prepare-project-plan", "instruction": "ヘッダーの「案件デスク」を開き、DB移行方式を選択し、許容停止時間内の作業時間、TTL短縮計画 (3日前以上)、利用者周知 (1日前以上)、具体的な切戻し条件と手順を記入してください。", "requiredEvents": ["tutorial:project-plan-ready"], "explanation": "移行作業に入る前に、停止時間・DNSキャッシュ・利用者影響・切戻しを計画します。Data Pump、RMAN、Data Guardで停止時間と運用手順が変わります。" },

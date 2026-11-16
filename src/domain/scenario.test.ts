@@ -103,10 +103,13 @@ describe("scenario integrity validation", () => {
     const scenario = loadScenario(scenarioDefinition);
 
     expect(scenario.storyMode?.enabled).toBe(true);
-    expect(scenario.storyMode?.steps).toHaveLength(7);
-    expect(scenario.tutorialSteps).toHaveLength(26);
+    expect(scenario.storyMode?.steps).toHaveLength(16);
+    expect(scenario.tutorialSteps).toHaveLength(33);
     expect(scenario.storyMode?.steps.map((step) => step.tutorialStepId)).toContain("reduce-dns-ttl");
-    expect(scenario.storyMode?.steps[4]?.failureBranch?.diagram).toContain("旧DNSキャッシュ (TTL 86400秒)");
+    expect(scenario.storyMode?.steps.find((step) => step.tutorialStepId === "review-project-mail")?.quiz).toBeDefined();
+    expect(scenario.tutorialSteps.map((step) => step.id)).toContain("review-project-meeting");
+    expect(scenario.storyMode?.steps.find((step) => step.tutorialStepId === "reduce-dns-ttl")?.failureBranch?.diagram)
+      .toContain("旧DNSキャッシュ (TTL 86400秒)");
   });
 
   it("requires exactly one recommended answer in each story quiz", () => {

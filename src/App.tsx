@@ -126,6 +126,7 @@ function getObservationServers(scenario: Scenario, stepId: string, fallback: [st
   const dnsServer = server("dns", "infrastructure") ?? server("dns", "source");
 
   if (stepId === "inspect-network-routes" && sourceDatabase) return [sourceApplication, sourceDatabase];
+  if (["inspect-dns-record", "inspect-application-config"].includes(stepId)) return [sourceApplication, targetApplication];
   if (["inspect-oracle-source"].includes(stepId) && sourceDatabase) {
     return [sourceDatabase, targetDatabase ?? sourceDatabase];
   }
@@ -140,6 +141,15 @@ function getObservationTarget(stepId: string): string {
   if (["record-investigation-notes", "map-architecture", "prepare-project-plan", "send-user-notice", "approve-cutover"].includes(stepId)) {
     return "project-desk";
   }
+  if (stepId === "review-project-documents") return "project-documents";
+  if (stepId === "review-project-mail") return "project-mail";
+  if (stepId === "review-project-teams") return "project-teams";
+  if (stepId === "review-project-meeting") return "project-meetings";
+  if (stepId === "review-project-effort") return "project-effort";
+  if (["inspect-os", "inspect-hostname", "inspect-java", "inspect-dns-record", "inspect-application-config"].includes(stepId)) {
+    return "console-source-application";
+  }
+  if (stepId === "inspect-oracle-source") return "console-source-database";
   if (stepId === "inspect-network-routes" || stepId === "migrate-database") return "server-grid";
   if (["inspect-oracle-source"].includes(stepId)) return "server-source-database";
   if (["install-target-oracle", "start-and-inspect-target-oracle"].includes(stepId)) return "server-target-database";
@@ -162,13 +172,18 @@ function getObservationTarget(stepId: string): string {
 
 function getObservationProjectTab(stepId: string): ProjectDeskTab {
   if (["record-investigation-notes", "map-architecture"].includes(stepId)) return "investigation";
+  if (stepId === "review-project-documents") return "documents";
+  if (stepId === "review-project-mail") return "mail";
+  if (stepId === "review-project-teams") return "teams";
+  if (stepId === "review-project-meeting") return "meetings";
+  if (stepId === "review-project-effort") return "effort";
   if (["prepare-project-plan", "send-user-notice"].includes(stepId)) return "plan";
   return "cutover";
 }
 
 function getObservationApp(stepId: string): ManagerApp | null {
   if (stepId.startsWith("install-target-")) return "setup";
-  if (["inspect-oracle-source", "start-and-inspect-target-oracle", "migrate-database"].includes(stepId)) return "database";
+  if (["start-and-inspect-target-oracle", "migrate-database"].includes(stepId)) return "database";
   if (stepId === "migrate-resin-config") return "resinConfig";
   if (["migrate-services", "start-resin", "verify-operational-readiness"].includes(stepId)) return "services";
   if (stepId === "migrate-tasks") return "tasks";
@@ -176,6 +191,33 @@ function getObservationApp(stepId: string): ManagerApp | null {
   if (["reduce-dns-ttl", "cutover-dns"].includes(stepId)) return "dns";
   if (stepId === "investigate-events") return "events";
   return null;
+}
+
+function getObservationCommands(stepId: string): Array<{
+  role: Server["role"];
+  stage: Server["stage"];
+  command: string;
+}> {
+  if (stepId === "inspect-os") return [{ role: "application", stage: "source", command: "systeminfo" }];
+  if (stepId === "inspect-hostname") return [{ role: "application", stage: "source", command: "hostname" }];
+  if (stepId === "inspect-java") return [{ role: "application", stage: "source", command: "java -version" }];
+  if (stepId === "inspect-oracle-source") return [{ role: "database", stage: "source", command: "lsnrctl status" }];
+  if (stepId === "inspect-network-routes") {
+    return [
+      { role: "application", stage: "source", command: "route print" },
+      { role: "database", stage: "source", command: "route print" },
+    ];
+  }
+  if (stepId === "inspect-dns-record") {
+    return [{ role: "application", stage: "source", command: "nslookup intra.example.local" }];
+  }
+  if (stepId === "inspect-application-config") {
+    return [
+      { role: "application", stage: "source", command: "type jdbc.properties" },
+      { role: "application", stage: "source", command: "type resin.conf" },
+    ];
+  }
+  return [];
 }
 
 function jdbcDraftKey(serverId: string): string {
@@ -476,14 +518,49 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   };
 
   const handleObservationStepChange = useCallback((step: TutorialStep) => {
-    const projectStepIds = ["record-investigation-notes", "map-architecture", "prepare-project-plan", "send-user-notice", "approve-cutover"];
+    const projectStepIds = [
+      "record-investigation-notes",
+      "map-architecture",
+      "review-project-documents",
+      "review-project-mail",
+      "review-project-teams",
+      "review-project-meeting",
+      "review-project-effort",
+      "prepare-project-plan",
+      "send-user-notice",
+      "approve-cutover",
+    ];
     const projectStep = projectStepIds.includes(step.id);
     const paneIds = getObservationServers(scenario, step.id, initialPanes);
     const app = getObservationApp(step.id);
+    const observationHistory: Record<string, ConsoleEntry[]> = {};
+    paneIds.forEach((serverId) => { observationHistory[serverId] = []; });
+    getObservationCommands(step.id).forEach(({ role, stage, command }, index) => {
+      const server = scenario.assets.servers.find((item) => item.role === role && item.stage === stage);
+      if (!server) throw new Error(`Observation command server not found: ${stage} ${role}`);
+      const environment = environments[server.id];
+      if (!environment) throw new Error(`Observation command runtime not found: ${server.id}`);
+      const result = runCommand(
+        command,
+        server,
+        scenario,
+        environment,
+        environments,
+        dns,
+        provider !== "onprem" ? cloudWorkspace.securityGroupPorts : undefined,
+        projectWorkspace.migrationStrategy,
+      );
+      observationHistory[server.id] = [
+        ...(observationHistory[server.id] ?? []),
+        { id: index + 1, command, output: result.output },
+      ];
+    });
     setObservationTargetId(getObservationTarget(step.id));
     setObservationProjectTab(projectStep ? getObservationProjectTab(step.id) : null);
     setActiveSidePanel(projectStep ? "project" : null);
     setPaneServerIds(paneIds);
+    setHistory(observationHistory);
+    setInputs(Object.fromEntries(paneIds.map((serverId) => [serverId, ""])));
     setActiveApps(Object.fromEntries(paneIds.map((serverId) => {
       const server = scenario.assets.servers.find((item) => item.id === serverId);
       const isCompatible = app && server
@@ -492,7 +569,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
             : server.role === "application" && (app !== "setup" || server.stage === "target"));
       return [serverId, isCompatible ? app : null];
     })));
-  }, [initialPanes, scenario]);
+  }, [cloudWorkspace.securityGroupPorts, dns, environments, initialPanes, projectWorkspace.migrationStrategy, provider, scenario]);
 
   const notify = (message: string) => {
     setNotice(message);
@@ -630,6 +707,9 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     if (normalized === "systeminfo" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:os:source");
     if (normalized === "hostname" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:hostname:source");
     if (normalized === "java -version" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:java:source");
+    if (normalized.startsWith("nslookup ") && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:dns:source");
+    if (normalized === "type jdbc.properties" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:jdbc:source");
+    if (normalized === "type resin.conf" && server.role === "application" && server.stage === "source") recordAuditEvent("inspect:resin-config:source");
     if (normalized === "route print" && server.stage === "source"
       && (server.role === "application" || server.role === "database")) {
       recordAuditEvent(`inspect:route:${server.role}:source`);
@@ -1251,6 +1331,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
                 shellMode={shellModes[serverId] ?? "cmd"}
                 transfer={transfer}
                 migrationStrategy={projectWorkspace.migrationStrategy}
+                observationFocusTargetId={observationTargetId}
                 draft={activeApp === "resinConfig"
                   ? drafts[resinConfigDraftKey(serverId)] ?? environment.configurationFiles[0]?.content ?? ""
                   : drafts[jdbcDraftKey(serverId)] ?? environment.jdbcProperties ?? ""}
@@ -1640,7 +1721,16 @@ function ProjectDeskPanel({
   const [tab, setTab] = useState<"overview" | "investigation" | "documents" | "mail" | "teams" | "meetings" | "effort" | "plan" | "cutover">("overview");
   useEffect(() => {
     if (observationTab) setTab(observationTab);
-  }, [observationTab]);
+    if (observationTab === "documents") setSelectedDocumentId(scenario.projectDocuments[0]?.id ?? "");
+    if (observationTab === "mail") {
+      setSelectedMailId(scenario.projectMails.find((mail) => mail.importance === "high")?.id ?? scenario.projectMails[0]?.id ?? "");
+    }
+    if (observationTab === "effort") {
+      const document = scenario.projectDocuments[0];
+      setEstimateDocumentId(document?.id ?? "");
+      setEstimateSectionId(document?.sections[0]?.id ?? "");
+    }
+  }, [observationTab, scenario]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDetail, setNoteDetail] = useState("");
   const [edgeFrom, setEdgeFrom] = useState("");
@@ -1827,7 +1917,7 @@ function ProjectDeskPanel({
           </div>
         </div>}
 
-        {tab === "documents" && <div className="project-tab-content">
+        {tab === "documents" && <div className="project-tab-content" data-observation-target={observationTab === "documents" ? "project-documents" : undefined}>
           <p className="project-intro">資料を読み、判断を記録してください。操作の実施だけでは根拠点は入りません。判断内容の選択自体に唯一の正解がない場合も、根拠の引用と論点の説明を評価します。</p>
           <div className="project-columns project-document-workspace">
             <section className="project-section">
@@ -1883,7 +1973,7 @@ function ProjectDeskPanel({
           </div>
         </div>}
 
-        {tab === "mail" && <div className="project-tab-content">
+        {tab === "mail" && <div className="project-tab-content" data-observation-target={observationTab === "mail" ? "project-mail" : undefined}>
           <div className="project-mail-toolbar"><Mail size={15} /><strong>受信トレイ</strong><span>案件関係者からの連絡を確認し、判断・計画へ反映してください。</span></div>
           <div className="project-mail-layout">
             <section className="project-section project-mail-inbox">
@@ -1919,7 +2009,7 @@ function ProjectDeskPanel({
           </div>
         </div>}
 
-        {tab === "teams" && <div className="project-tab-content">
+        {tab === "teams" && <div className="project-tab-content" data-observation-target={observationTab === "teams" ? "project-teams" : undefined}>
           <div className="project-teams-toolbar"><MessageCircle size={15} /><strong>プロジェクト チャット</strong><span>返信を選ぶと案件記録に残り、合意リスクの評価へ反映されます。</span></div>
           <div className="project-teams-layout">
             <section className="project-section project-teams-people">
@@ -1954,7 +2044,7 @@ function ProjectDeskPanel({
           </div>
         </div>}
 
-        {tab === "meetings" && <div className="project-tab-content">
+        {tab === "meetings" && <div className="project-tab-content" data-observation-target={observationTab === "meetings" ? "project-meetings" : undefined}>
           <div className="project-meeting-toolbar"><strong>会議・議事録</strong><span>関係者と判断を合意し、選択内容から議事録を作成します。</span></div>
           {scenario.projectMeetings.length === 0
             ? <p className="project-empty">予定されている会議はありません。</p>
@@ -2010,7 +2100,7 @@ function ProjectDeskPanel({
             </div>}
         </div>}
 
-        {tab === "effort" && <div className="project-tab-content project-columns">
+        {tab === "effort" && <div className="project-tab-content project-columns" data-observation-target={observationTab === "effort" ? "project-effort" : undefined}>
           <section className="project-section">
             <h3>案件規模と前提</h3>
             <div className="project-brief-grid">
@@ -2287,10 +2377,12 @@ function ServerSession({
   onTaskRun,
   onNotify,
   onCloseApp,
+  observationFocusTargetId,
 }: {
   slot: string;
   server: Server;
   observationTargetId: string;
+  observationFocusTargetId: string;
   servers: Server[];
   environment: RuntimeEnvironment;
   environments: RuntimeEnvironments;
@@ -2326,6 +2418,8 @@ function ServerSession({
   onCloseApp: () => void;
 }) {
   const issueEvents = getEventLog(server, scenario, environment, environments, dns, allowedInboundPorts);
+  const consoleTargetId = `console-${server.stage}-${server.role}`;
+  const consoleIsFocused = observationFocusTargetId === consoleTargetId;
   const sourceDatabase = scenario.assets.servers.find((item) => item.role === "database" && item.stage === "source");
   const sourceDatabaseRevision = sourceDatabase ? environments[sourceDatabase.id]?.databaseRevision ?? 0 : 0;
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -2340,7 +2434,7 @@ function ServerSession({
         <div className="server-name"><strong>{server.hostname}</strong><span>Administrator · 接続中</span></div>
         <label className="server-picker"><span>接続先</span><select value={server.id} onChange={(event) => onServerChange(event.target.value)} aria-label={`${slot}側の接続先`}>{servers.map((item) => <option value={item.id} key={item.id}>{item.hostname}</option>)}</select><ChevronDown size={13} /></label>
       </div>
-      <div className="machine-window" data-observation-target={observationTargetId}>
+      <div className="machine-window" data-observation-target={consoleIsFocused ? undefined : observationTargetId}>
         <div className="machine-titlebar"><div className="titlebar-product"><span className="windows-mark">⊞</span><span>{app ? managerTitle(app) : shellMode === "powershell" ? "Administrator: Windows PowerShell" : "Administrator: Command Prompt"}</span></div><div className="window-controls"><button aria-label="最小化">─</button><button aria-label="最大化">□</button><button className="window-close" aria-label="閉じる" onClick={onCloseApp}><X size={13} /></button></div></div>
         <div className="app-quickbar" aria-label="Windows管理ツール">
           <button className={app === "explorer" ? "quick-active" : ""} onClick={() => onOpenApp("explorer")} title="エクスプローラー"><FolderOpen size={14} /><span>Explorer</span></button>
@@ -2386,7 +2480,7 @@ function ServerSession({
         ) : (
           <div className="terminal">
             <div className="terminal-meta"><span><i />{shellMode === "powershell" ? "Windows PowerShell" : "C:\\Windows\\System32\\cmd.exe"}</span><span>Administrator</span></div>
-            <div className="terminal-scroll" key={server.id}>
+            <div className="terminal-scroll" key={server.id} data-observation-target={consoleIsFocused ? consoleTargetId : undefined}>
               <div className="terminal-welcome">{shellMode === "powershell" ? "Windows PowerShell\nCopyright (C) Microsoft Corporation. All rights reserved." : <>Microsoft Windows [Version {server.operatingSystem.includes("2019") ? "10.0.17763.0" : "10.0.14393.0"}]<br />(c) Microsoft Corporation. All rights reserved.</>}</div>
               {history.map((entry) => <div className="command-result" key={entry.id}><div className="command-echo"><span>{shellMode === "powershell" ? "PS C:\\Users\\Administrator>" : "C:\\Users\\Administrator>"}</span> {entry.command}</div><div className="command-output">{entry.output.map((line, index) => <div key={index} className={line.startsWith("***") || line.startsWith("'") ? "output-error" : ""}>{line || "\u00a0"}</div>)}</div></div>)}
               <form className="command-entry" onSubmit={handleSubmit}><label htmlFor={`cmd-${server.id}`}>{shellMode === "powershell" ? "PS C:\\Users\\Administrator>" : "C:\\Users\\Administrator>"}</label><input id={`cmd-${server.id}`} value={input} onChange={(event) => onInputChange(event.target.value)} autoComplete="off" spellCheck={false} aria-label={`${server.hostname} command`} placeholder="コマンドを入力..." /><button type="submit" aria-label="コマンド実行"><Play size={14} /></button></form>

@@ -197,6 +197,7 @@ export interface StoryQuizChoice {
   id: string;
   label: string;
   correct: boolean;
+  feedback?: string;
 }
 
 export interface StoryFailureBranch {

@@ -291,12 +291,31 @@ export function deriveTutorialEvents(
       normalize(actual.from) === normalize(expected.from) && normalize(actual.to) === normalize(expected.to),
     ),
   );
+  const documentsReviewed = project.readDocumentIds.length >= Math.min(2, scenario.projectDocuments.length);
+  const priorityMails = scenario.projectMails.filter((mail) => mail.importance === "high");
+  const mailReviewed = priorityMails.length === 0 || priorityMails.some((mail) => project.readMailIds.includes(mail.id));
+  const stakeholdersAligned = scenario.projectChats.some((chat) => {
+    const response = project.chatResponses.find((item) => item.threadId === chat.id);
+    return chat.choices.some((choice) => choice.id === response?.choiceId && choice.recommended);
+  });
+  const meetingRecorded = scenario.projectMeetings.some((meeting) => {
+    const record = project.meetingRecords.find((item) => item.meetingId === meeting.id);
+    return Boolean(record && meeting.agendaItems.every((agendaItem) => {
+      const decision = record.decisions.find((item) => item.agendaItemId === agendaItem.id);
+      return agendaItem.choices.some((choice) => choice.id === decision?.choiceId && choice.recommended);
+    }));
+  });
   const resinConfigMigrationComplete = hasCurrentResinConfigMigration(events);
 
   if (cloudSetupReady) derivedEvents.push({ name: "tutorial:cloud-setup-ready", at: 0 });
   if (projectPlanReady) derivedEvents.push({ name: "tutorial:project-plan-ready", at: 0 });
   if (completeInvestigationNotes >= 3) derivedEvents.push({ name: "tutorial:investigation-notes-ready", at: 0 });
   if (architectureMapped) derivedEvents.push({ name: "tutorial:architecture-ready", at: 0 });
+  if (documentsReviewed) derivedEvents.push({ name: "project:documents-reviewed", at: 0 });
+  if (mailReviewed) derivedEvents.push({ name: "project:mail-reviewed", at: 0 });
+  if (stakeholdersAligned) derivedEvents.push({ name: "project:teams-aligned", at: 0 });
+  if (meetingRecorded) derivedEvents.push({ name: "project:meeting-recorded", at: 0 });
+  if (project.estimateConfirmedAt !== null) derivedEvents.push({ name: "project:effort-estimated", at: 0 });
   if (project.cutoverDecision === "go"
     && readinessItems.length > 0
     && readinessItems.every((item) => item.ready)) {
