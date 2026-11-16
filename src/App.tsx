@@ -66,6 +66,7 @@ import type {
   RuntimeService,
   Scenario,
   Server,
+  StoryAction,
   Task,
   TutorialStep,
   TransferPackage,
@@ -73,6 +74,7 @@ import type {
 import { StoryModePlayer } from "./components/StoryModePlayer";
 import { loadScenario } from "./domain/scenario";
 import { createInitialProjectWorkspace } from "./domain/project";
+import { createObservationPreview, type ObservationPreview } from "./domain/observation";
 import { parseSimulationSave, type SimulationSave } from "./domain/save";
 import {
   calculateAuditReport,
@@ -138,19 +140,26 @@ function getObservationServers(scenario: Scenario, stepId: string, fallback: [st
 }
 
 function getObservationTarget(stepId: string): string {
-  if (["record-investigation-notes", "map-architecture", "prepare-project-plan", "send-user-notice", "approve-cutover"].includes(stepId)) {
-    return "project-desk";
-  }
-  if (stepId === "review-project-documents") return "project-documents";
-  if (stepId === "review-project-mail") return "project-mail";
-  if (stepId === "review-project-teams") return "project-teams";
-  if (stepId === "review-project-meeting") return "project-meetings";
-  if (stepId === "review-project-effort") return "project-effort";
+  if ([
+    "record-investigation-notes",
+    "map-architecture",
+    "review-project-documents",
+    "review-project-mail",
+    "review-project-teams",
+    "review-project-meeting",
+    "review-project-effort",
+    "prepare-project-plan",
+    "send-user-notice",
+    "approve-cutover",
+  ].includes(stepId)) return "project-desk";
   if (["inspect-os", "inspect-hostname", "inspect-java", "inspect-dns-record", "inspect-application-config"].includes(stepId)) {
     return "console-source-application";
   }
   if (stepId === "inspect-oracle-source") return "console-source-database";
   if (stepId === "inspect-network-routes" || stepId === "migrate-database") return "server-grid";
+  if (["migrate-jdbc", "migrate-services", "migrate-resin-config", "migrate-tasks", "migrate-certificates"].includes(stepId)) {
+    return "server-grid";
+  }
   if (["inspect-oracle-source"].includes(stepId)) return "server-source-database";
   if (["install-target-oracle", "start-and-inspect-target-oracle"].includes(stepId)) return "server-target-database";
   if (["reduce-dns-ttl", "cutover-dns"].includes(stepId)) return "server-infrastructure-dns";
@@ -184,9 +193,10 @@ function getObservationProjectTab(stepId: string): ProjectDeskTab {
 function getObservationApp(stepId: string): ManagerApp | null {
   if (stepId.startsWith("install-target-")) return "setup";
   if (["start-and-inspect-target-oracle", "migrate-database"].includes(stepId)) return "database";
+  if (stepId === "migrate-jdbc") return "notepad";
   if (stepId === "migrate-resin-config") return "resinConfig";
-  if (["migrate-services", "start-resin", "verify-operational-readiness"].includes(stepId)) return "services";
-  if (stepId === "migrate-tasks") return "tasks";
+  if (["migrate-services", "start-resin"].includes(stepId)) return "services";
+  if (["migrate-tasks", "verify-operational-readiness"].includes(stepId)) return "tasks";
   if (stepId === "migrate-certificates") return "certificates";
   if (["reduce-dns-ttl", "cutover-dns"].includes(stepId)) return "dns";
   if (stepId === "investigate-events") return "events";
@@ -215,6 +225,15 @@ function getObservationCommands(stepId: string): Array<{
     return [
       { role: "application", stage: "source", command: "type jdbc.properties" },
       { role: "application", stage: "source", command: "type resin.conf" },
+    ];
+  }
+  if (stepId === "verify-connectivity") {
+    return [{ role: "application", stage: "target", command: "curl http://APSV02:8080/" }];
+  }
+  if (stepId === "verify-post-cutover") {
+    return [
+      { role: "application", stage: "target", command: "ipconfig /flushdns" },
+      { role: "application", stage: "target", command: "curl http://intra.example.local:8080/" },
     ];
   }
   return [];
@@ -290,6 +309,8 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
   const [storyModeActive, setStoryModeActive] = useState(false);
   const [observationTargetId, setObservationTargetId] = useState("server-source-application");
   const [observationProjectTab, setObservationProjectTab] = useState<ProjectDeskTab | null>(null);
+  const [observationStepId, setObservationStepId] = useState<string | null>(null);
+  const [observationPreview, setObservationPreview] = useState<ObservationPreview | null>(null);
   const [provider, setProvider] = useState<DeploymentProvider>("onprem");
   const [cloudWorkspace, setCloudWorkspace] = useState<CloudWorkspace>(() => createInitialCloudWorkspace());
   const [desktopShortcut, setDesktopShortcut] = useState<DesktopShortcut>("cmd");
@@ -470,6 +491,8 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     setStoryModeActive(observation);
     setObservationTargetId("server-source-application");
     setObservationProjectTab(null);
+    setObservationStepId(null);
+    setObservationPreview(null);
     setScreen("lab");
   };
 
@@ -531,6 +554,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       "approve-cutover",
     ];
     const projectStep = projectStepIds.includes(step.id);
+    const preview = createObservationPreview(scenario, step.id);
     const paneIds = getObservationServers(scenario, step.id, initialPanes);
     const app = getObservationApp(step.id);
     const observationHistory: Record<string, ConsoleEntry[]> = {};
@@ -538,15 +562,15 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     getObservationCommands(step.id).forEach(({ role, stage, command }, index) => {
       const server = scenario.assets.servers.find((item) => item.role === role && item.stage === stage);
       if (!server) throw new Error(`Observation command server not found: ${stage} ${role}`);
-      const environment = environments[server.id];
+      const environment = preview.environments[server.id];
       if (!environment) throw new Error(`Observation command runtime not found: ${server.id}`);
       const result = runCommand(
         command,
         server,
         scenario,
         environment,
-        environments,
-        dns,
+        preview.environments,
+        preview.dns,
         provider !== "onprem" ? cloudWorkspace.securityGroupPorts : undefined,
         projectWorkspace.migrationStrategy,
       );
@@ -557,6 +581,8 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
     });
     setObservationTargetId(getObservationTarget(step.id));
     setObservationProjectTab(projectStep ? getObservationProjectTab(step.id) : null);
+    setObservationStepId(step.id);
+    setObservationPreview(preview);
     setActiveSidePanel(projectStep ? "project" : null);
     setPaneServerIds(paneIds);
     setHistory(observationHistory);
@@ -566,10 +592,11 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       const isCompatible = app && server
         && (app === "dns" ? server.role === "dns"
           : app === "database" ? server.role === "database"
-            : server.role === "application" && (app !== "setup" || server.stage === "target"));
+            : app === "setup" ? server.stage === "target"
+              : server.role === "application");
       return [serverId, isCompatible ? app : null];
     })));
-  }, [cloudWorkspace.securityGroupPorts, dns, environments, initialPanes, projectWorkspace.migrationStrategy, provider, scenario]);
+  }, [cloudWorkspace.securityGroupPorts, initialPanes, projectWorkspace.migrationStrategy, provider, scenario]);
 
   const notify = (message: string) => {
     setNotice(message);
@@ -1204,6 +1231,24 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         : mode === "advanced"
           ? "切替後、ログインできません。"
           : scenario.incidents.find((incident) => incident.id === expertIncidentId)?.description ?? "業務システムで障害が発生しています。ログと構成から原因を特定してください。";
+  const visibleEnvironments = storyModeActive && observationPreview
+    ? observationPreview.environments
+    : environments;
+  const visibleDns = storyModeActive && observationPreview ? observationPreview.dns : dns;
+  const visibleDnsDraft = storyModeActive && observationPreview ? observationPreview.dnsDraft : dnsDraft;
+  const visibleTaskRuns = storyModeActive && observationPreview ? observationPreview.taskRuns : taskRuns;
+  const visibleProjectWorkspace = storyModeActive && observationPreview
+    ? observationPreview.projectWorkspace
+    : projectWorkspace;
+  const observationCutoverApproved = storyModeActive
+    && Boolean(observationStepId)
+    && ["approve-cutover", "cutover-dns", "verify-post-cutover", "investigate-events"].includes(observationStepId ?? "");
+  const visibleReadinessItems = observationCutoverApproved
+    ? cutoverReadiness.map((item) => ({ ...item, ready: true, detail: "" }))
+    : cutoverReadiness;
+  const activeObservationActions: StoryAction[] = storyModeActive && observationStepId
+    ? scenario.storyMode?.steps.find((step) => step.tutorialStepId === observationStepId)?.autoActions ?? []
+    : [];
 
   if (screen === "desktop") {
     return (
@@ -1310,7 +1355,7 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
         <div className="session-grid" data-observation-target="server-grid">
           {paneServerIds.map((serverId, index) => {
             const server = scenario.assets.servers.find((item) => item.id === serverId);
-            const environment = environments[serverId];
+            const environment = visibleEnvironments[serverId];
             if (!server || !environment) throw new Error(`Unknown server session: ${serverId}`);
             const activeApp = activeApps[serverId];
             return (
@@ -1320,10 +1365,10 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
                 server={server}
                 servers={availableServers}
                 environment={environment}
-                environments={environments}
-                dns={dns}
+                environments={visibleEnvironments}
+                dns={visibleDns}
                 allowedInboundPorts={provider !== "onprem" ? cloudWorkspace.securityGroupPorts : undefined}
-                dnsDraft={dnsDraft}
+                dnsDraft={visibleDnsDraft}
                 scenario={scenario}
                 history={history[serverId] ?? []}
                 input={inputs[serverId] ?? ""}
@@ -1331,11 +1376,13 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
                 shellMode={shellModes[serverId] ?? "cmd"}
                 transfer={transfer}
                 migrationStrategy={projectWorkspace.migrationStrategy}
+                observationActions={activeObservationActions.filter((action) => action.actor === server.hostname)}
+                readOnlyObservation={storyModeActive}
                 observationFocusTargetId={observationTargetId}
                 draft={activeApp === "resinConfig"
                   ? drafts[resinConfigDraftKey(serverId)] ?? environment.configurationFiles[0]?.content ?? ""
                   : drafts[jdbcDraftKey(serverId)] ?? environment.jdbcProperties ?? ""}
-                taskRuns={taskRuns}
+                taskRuns={visibleTaskRuns}
                 observationTargetId={`server-${server.stage}-${server.role}`}
                 onServerChange={(id) => changePaneServer(index as 0 | 1, id)}
                 onInputChange={(value) => setInputs((previous) => ({ ...previous, [serverId]: value }))}
@@ -1500,16 +1547,17 @@ function SimulationApp({ scenario, scenarios, advisor, onScenarioChange }: {
       {activeSidePanel && <aside className="lab-side-panel" aria-label="案件ツール">
         {activeSidePanel === "project" && <ProjectDeskPanel
           scenario={scenario}
-          project={projectWorkspace}
+          project={visibleProjectWorkspace}
+          observationActions={activeObservationActions}
           observationTab={storyModeActive ? observationProjectTab : null}
           readOnlyObservation={storyModeActive}
           effortEstimate={auditReport.effortEstimate}
-          dnsAddress={dns.address}
-          cachedDnsAddress={dns.cachedAddress}
+          dnsAddress={visibleDns.address}
+          cachedDnsAddress={visibleDns.cachedAddress}
           sourceAddress={sourceApplication?.ipAddress ?? ""}
           targetAddress={targetApplication?.ipAddress ?? ""}
           hasOpenIssues={hasOpenIssues}
-          readinessItems={cutoverReadiness}
+          readinessItems={visibleReadinessItems}
           onChange={setProjectWorkspace}
           onSendNotice={sendUserNotice}
           onDecision={recordCutoverDecision}
@@ -1686,6 +1734,7 @@ function DesktopHome({
 function ProjectDeskPanel({
   scenario,
   project,
+  observationActions,
   observationTab,
   readOnlyObservation,
   effortEstimate,
@@ -1703,6 +1752,7 @@ function ProjectDeskPanel({
 }: {
   scenario: Scenario;
   project: ProjectWorkspace;
+  observationActions: StoryAction[];
   observationTab: ProjectDeskTab | null;
   readOnlyObservation: boolean;
   effortEstimate: ReturnType<typeof calculateAuditReport>["effortEstimate"];
@@ -1896,6 +1946,7 @@ function ProjectDeskPanel({
         <nav className="project-tabs" aria-label="案件デスクの項目">
           {tabs.map((item) => <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => setTab(item.id)}>{item.label}</button>)}
         </nav>
+        {readOnlyObservation && observationActions.length > 0 && <ObservationActionResults actions={observationActions} />}
 
         {tab === "overview" && <div className="project-tab-content">
           <p className="project-intro">{scenario.title} — 技術作業に加え、調査・設計・周知・切替判断を記録します。入力内容は自動保存されます。</p>
@@ -2357,6 +2408,8 @@ function ServerSession({
   shellMode,
   transfer,
   migrationStrategy,
+  observationActions,
+  readOnlyObservation,
   draft,
   taskRuns,
   onServerChange,
@@ -2396,6 +2449,8 @@ function ServerSession({
   shellMode: ShellMode;
   transfer: TransferPackage | null;
   migrationStrategy: DatabaseMigrationStrategy;
+  observationActions: StoryAction[];
+  readOnlyObservation: boolean;
   draft: string;
   taskRuns: Record<string, string>;
   onServerChange: (id: string) => void;
@@ -2459,6 +2514,8 @@ function ServerSession({
             dnsDraft={dnsDraft}
             transfer={transfer}
             migrationStrategy={migrationStrategy}
+            observationActions={observationActions}
+            readOnlyObservation={readOnlyObservation}
             draft={draft}
             issues={issueEvents}
             taskRuns={taskRuns}
@@ -2504,6 +2561,8 @@ function ManagerWindow({
   dnsDraft,
   transfer,
   migrationStrategy,
+  observationActions,
+  readOnlyObservation,
   draft,
   issues,
   taskRuns,
@@ -2530,6 +2589,8 @@ function ManagerWindow({
   dnsDraft: DnsRuntime;
   transfer: TransferPackage | null;
   migrationStrategy: DatabaseMigrationStrategy;
+  observationActions: StoryAction[];
+  readOnlyObservation: boolean;
   draft: string;
   issues: Array<{ source: string; type: "Error" | "Warning"; message: string }>;
   taskRuns: Record<string, string>;
@@ -2567,8 +2628,9 @@ function ManagerWindow({
     : "jdbc.url=jdbc:oracle:thin:@<DB_HOST>:1521:<SERVICE>";
 
   return (
-    <div className={`manager-window ${app === "events" ? "event-manager" : ""}`}>
+    <div className={`manager-window ${app === "events" ? "event-manager" : ""} ${readOnlyObservation ? "read-only-observation" : ""}`}>
       <div className="mmc-menubar"><span>ファイル</span><span>操作</span><span>表示</span><span>ヘルプ</span></div>
+      {readOnlyObservation && observationActions.length > 0 && <ObservationActionResults actions={observationActions} />}
       {app === "services" && <ManagerFrame title="サービス (ローカル)" icon={<Settings size={15} />}>
         <div className="manager-toolbar service-columns"><span>名前</span><span>状態</span><span>起動種類</span><span>実行ユーザー</span><span>操作</span></div>
         {environment.services.length ? environment.services.map((service) => <div className="manager-row service-columns" key={service.id}><div className="manager-primary"><Settings size={14} /><span><strong>{service.displayName}</strong><small>{service.name}</small></span></div><span className={`service-state ${service.status}`}>{service.status === "running" ? "実行中" : "停止"}</span><select className="service-startup-select" aria-label={`${service.displayName}の起動種類`} value={service.startupType} onChange={(event) => onServiceStartupTypeChange(server.id, service.id, event.currentTarget.value === "automatic" ? "automatic" : "manual")}><option value="automatic">自動</option><option value="manual">手動</option></select><span className="table-muted">{service.runAs}</span><button className="row-action" onClick={() => onServiceToggle(server.id, service.id)}><Power size={12} />{service.status === "running" ? "停止" : "開始"}</button></div>) : <EmptyManager text="サービスは見つかりませんでした。" /> }
@@ -2675,6 +2737,16 @@ function ManagerWindow({
       </ManagerFrame>}
     </div>
   );
+}
+
+function ObservationActionResults({ actions }: { actions: StoryAction[] }) {
+  return <section className="observation-action-results" aria-label="観察モードの操作結果">
+    <header><strong>観察モードの操作結果</strong><span>読み取り専用の画面プレビュー</span></header>
+    <div className="observation-action-list">{actions.map((action, index) => <article key={`${action.actor}-${action.label}-${index}`}>
+      <div><strong>{action.label}</strong>{action.command && <code>{action.command}</code>}</div>
+      <pre>{action.output.join("\n")}</pre>
+    </article>)}</div>
+  </section>;
 }
 
 function ManagerFrame({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {

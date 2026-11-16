@@ -155,6 +155,18 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 @keyframes show-notice { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
 .manager-window { height: 426px; overflow: auto; color: #3b4c63; background: #f5f7fa; }
+.observation-action-results { display: grid; gap: 7px; margin: 8px 10px; padding: 9px; color: #344c67; border: 1px solid #b9cee4; border-radius: 5px; background: #edf5fd; }
+.observation-action-results > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.observation-action-results > header strong { color: #355b82; font-size: 11px; }
+.observation-action-results > header span { color: #617b98; font-size: 9px; }
+.observation-action-list { display: grid; gap: 6px; }
+.observation-action-list article { padding: 7px 8px; border: 1px solid #d6e2ee; border-radius: 4px; background: #fff; }
+.observation-action-list article > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 9px; }
+.observation-action-list article strong { color: #405d7a; font-size: 10px; }
+.observation-action-list code { color: #52657c; font: 9px Consolas,monospace; }
+.observation-action-list pre { margin: 5px 0 0; color: #344b63; font: 9px/1.5 Consolas,monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.read-only-observation .manager-bottom-actions .manager-action-group { display: none; }
+.read-only-observation button,.read-only-observation select,.read-only-observation textarea { pointer-events: none; }
 .mmc-menubar { height: 25px; display: flex; align-items: center; gap: 18px; padding: 0 10px; color: #69798f; background: #fafbfd; border-bottom: 1px solid #e2e7ed; font-size: 8.8px; }
 .mmc-frame { min-height: 100%; }
 .mmc-frame-title { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 11px; color: #56708e; background: #edf3fa; border-bottom: 1px solid #dfe6ee; }

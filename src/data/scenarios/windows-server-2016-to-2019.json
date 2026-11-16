@@ -32,7 +32,7 @@
         "tutorialStepId": "inspect-java",
         "aiComment": "「Java 17に上げる」より先に、アプリがJava 8以外で動く根拠を調べます。",
         "autoActions": [
-          { "label": "Javaバージョンを確認", "actor": "APSV01", "command": "java -version", "output": ["java version \"1.8.0_202\"", "Java SE Runtime Environment (build 1.8.0_202-b08)"] }
+          { "label": "Javaバージョンを確認", "actor": "APSV01", "command": "java -version", "output": ["java version \"8\"", "Java(TM) SE Runtime Environment", "Java HotSpot(TM) 64-Bit Server VM"] }
         ],
         "quiz": {
           "question": "現行APのJavaが8と分かった後、移行先のJavaを決める前に必要なことは？",
@@ -48,7 +48,7 @@
         "tutorialStepId": "inspect-oracle-source",
         "aiComment": "DBの製品名だけでは判断できません。バージョン、サービス名、Listenerの状態を実際の出力で確認します。",
         "autoActions": [
-          { "label": "現行DBのListenerを確認", "actor": "DBSV01", "command": "lsnrctl status", "output": ["LSNRCTL for Oracle 11g - Production", "STATUS of the LISTENER", "Instance status READY"] }
+          { "label": "現行DBのListenerを確認", "actor": "DBSV01", "command": "lsnrctl status", "output": ["LSNRCTL for 11.2.0.4 - Production", "Connecting to (HOST=DBSV01)(PORT=1521)", "STATUS of the LISTENER", "Service \"ORCL\" has 1 instance(s).", "  Instance \"ORCL\", status READY"] }
         ],
         "quiz": {
           "question": "lsnrctl status の確認で分かることは？",
@@ -128,23 +128,23 @@
         "tutorialStepId": "review-project-teams",
         "aiComment": "技術担当との合意や未完了事項をチャットで確認し、責任者と期限を明確にします。",
         "autoActions": [
-          { "label": "NW担当・DBAの会話を確認", "actor": "案件担当者", "output": ["通信許可と最終同期の前提を確認", "未完了事項をGo/No-Goの条件へ反映"] }
+          { "label": "NW担当・DBAへ返信し前提を合意", "actor": "案件担当者", "output": ["NW担当: TTLを切替3日前までに短縮する申請と旧キャッシュ満了を調整", "DBA: 業務更新停止後に最終同期・整合性確認を実施", "担当者・期限・完了条件を切替判断へ反映"] }
         ],
         "quiz": {
-          "question": "NW担当から「Firewall申請がまだ」と連絡がありました。適切な対応は？",
+          "question": "NW担当からTTL短縮申請がまだ届いていないと連絡がありました。適切な対応は？",
           "choices": [
-            { "id": "teams-confirm", "label": "担当・期限を確認し、通信テスト完了まで切替前提を未完了として扱う", "correct": true, "feedback": "未完了の技術依存を記録し、疎通確認まで切替条件に含めます。" },
-            { "id": "teams-assume", "label": "他の担当者が申請したと考えて、そのまま進める", "correct": false, "feedback": "推測で未完了事項を閉じず、担当者と完了証跡を確認します。" },
-            { "id": "teams-skip-test", "label": "作業当日に初めて接続確認する", "correct": false, "feedback": "切替前に必要な通信を確認し、問題があれば計画を再調整します。" }
+            { "id": "teams-confirm", "label": "担当・期限を確認し、切替3日前までの変更完了と旧TTLキャッシュ満了を確認する", "correct": true, "feedback": "申請だけで完了とみなさず、適用結果とキャッシュ満了見込みまで確認します。" },
+            { "id": "teams-assume", "label": "依頼を送ったので変更済みとみなす", "correct": false, "feedback": "依頼の送信はDNS変更の完了証跡ではありません。" },
+            { "id": "teams-skip-test", "label": "切替当日にTTLとAレコードを同時に変更する", "correct": false, "feedback": "旧TTLのキャッシュが残るため、事前短縮と満了期間が必要です。" }
           ],
-          "answerExplanation": "未完了事項の担当者・期限・検証方法を合意し、Firewallの変更と接続テストをGo/No-Goの根拠にします。"
+          "answerExplanation": "担当者と期限を明確にし、TTLの適用結果と旧TTLキャッシュの満了見込みを確認してから切替を判断します。"
         }
       },
       {
         "tutorialStepId": "review-project-meeting",
         "aiComment": "会議の決定事項は作業計画へ反映し、担当者間で異なる前提が残らないよう議事録にします。",
         "autoActions": [
-          { "label": "移行判定会議の議題・決定条件を確認", "actor": "案件担当者", "output": ["切戻し判断期限と最終同期の条件を確認", "計画書の停止時間・切戻し手順と整合させる"] }
+          { "label": "移行判定会議の判断を議事録に確定", "actor": "案件担当者", "output": ["切替後30分以内の判断期限とデータ不整合時の切戻しを記録", "更新停止後の最終同期・整合性確認を記録", "作業計画の切戻し手順と照合"] }
         ],
         "quiz": {
           "question": "会議の合意は切戻し30分以内、作業計画は切戻し3時間です。どう対応しますか？",
@@ -160,7 +160,7 @@
         "tutorialStepId": "review-project-effort",
         "aiComment": "工数はコマンド実行時間だけではありません。調査・調整・リハーサル・検証・切戻し準備も含めます。",
         "autoActions": [
-          { "label": "総工数と見積根拠を確認", "actor": "案件担当者", "output": ["技術作業・資料調査・関係者調整・試験・切替・切戻しを対象にする", "見積値だけでなく、参照資料と前提を記録する"] }
+          { "label": "資料を根拠に総工数を例示", "actor": "案件担当者", "output": ["観察用の例示見積: 94 人時 (調査・調整・構築・DB/AP移行・切替・障害対応を含む)", "根拠: 本番運用手順書 2.1 作業可能時間と停止制約", "見積の前提と対象作業を記録"] }
         ],
         "quiz": {
           "question": "移行案件の工数見積に含めるべき作業は？",
@@ -176,7 +176,7 @@
         "tutorialStepId": "migrate-database",
         "aiComment": "移行方式の名前だけで選ばず、停止可能時間・更新量・同期完了の確認方法を根拠にします。",
         "autoActions": [
-          { "label": "現行DBからエクスポート", "actor": "DBSV01", "command": "expdp <schema> ...", "output": ["ORCLの対象スキーマをエクスポートしました。", "初回移行データ世代: 1"] },
+          { "label": "現行DBからエクスポート", "actor": "DBSV01", "command": "expdp <schema> ...", "output": ["ORCLのIMART・BATCHスキーマをエクスポートしました。", "移行元のデータ世代を記録しました。"] },
           { "label": "新DBへインポート", "actor": "DBSV02", "command": "impdp <schema> ...", "output": ["対象スキーマをインポートしました。", "最終同期後に移行元・移行先のデータ世代を照合します。"] }
         ]
       },
@@ -192,7 +192,8 @@
         "tutorialStepId": "reduce-dns-ttl",
         "aiComment": "DNSの値を変えるタイミングだけでなく、利用者側キャッシュがいつ更新されるかを考えます。",
         "autoActions": [
-          { "label": "現在のDNS設定を確認", "actor": "DNS01", "command": "nslookup intra.example.local", "output": ["Address: 10.10.1.21 (APSV01)", "TTL: 86400 seconds"] }
+          { "label": "現在のDNS設定を確認", "actor": "DNS01", "command": "nslookup intra.example.local", "output": ["Address: 10.10.1.21 (APSV01)", "変更前 TTL: 86400 seconds"] },
+          { "label": "TTLを短縮して適用", "actor": "DNS01", "output": ["TTL: 86400 → 300 seconds", "Aレコードは 10.10.1.21 (APSV01) のままです。"] }
         ],
         "quiz": {
           "question": "切替予定日の当日、TTLが86400秒のままです。まずどうしますか？",
@@ -223,9 +224,134 @@
         "tutorialStepId": "approve-cutover",
         "aiComment": "切替を実行できることと、今切り替えるべきことは別です。未確認事項があればNo-Goを選ぶ判断も重要です。",
         "autoActions": [
-          { "label": "切替前チェックとGo判定", "actor": "プロジェクトマネージャー", "output": ["事前疎通: HTTP 200", "最終同期・周知・切戻し条件: 確認済み", "判定: Go"] },
-          { "label": "DNSを新APへ切替", "actor": "DNS01", "command": "A intra.example.local 10.10.2.21", "output": ["intra.example.local → APSV02 (10.10.2.21)"] },
-          { "label": "本番名で稼働確認", "actor": "APSV02", "command": "curl http://intra.example.local:8080/", "output": ["HTTP/1.1 200 OK", "本番名から新APへの接続を確認しました。"] }
+          { "label": "切替前チェックとGo判定", "actor": "プロジェクトマネージャー", "output": ["事前疎通: HTTP 200", "最終同期・周知・切戻し条件: 確認済み", "判定: Go"] }
+        ]
+      },
+      {
+        "tutorialStepId": "record-investigation-notes",
+        "aiComment": "調査で得た事実を、後続の設計や切替判断に使える形で記録します。",
+        "autoActions": [
+          { "label": "AP・DB・DNSの調査メモを3件記録", "actor": "案件担当者", "output": ["現行APサーバー: Windows Server 2016 / Java 8 / Resin 4.0", "現行DB接続先: JDBC・Resin設定ともに DBSV01:1521:ORCL", "本番DNS: intra.example.local は APSV01 を指し、TTLは86400秒"] }
+        ]
+      },
+      {
+        "tutorialStepId": "map-architecture",
+        "aiComment": "構成図は資料を写すのではなく、調査した接続と依存理由を表します。",
+        "autoActions": [
+          { "label": "調査結果から依存関係を登録", "actor": "案件担当者", "output": ["利用者 → AD認証 → APサーバー", "DNS → APサーバー → Oracle DB", "定期バッチ → Oracle DB"] }
+        ]
+      },
+      {
+        "tutorialStepId": "prepare-project-plan",
+        "aiComment": "作業順だけでなく、停止枠・担当・確認条件・切戻し期限を計画に含めます。",
+        "autoActions": [
+          { "label": "移行計画の前提を整理", "actor": "案件担当者", "output": ["計画停止枠: 22:00-24:00 (上限120分)", "TTL短縮は切替3日前までに適用", "切替後30分以内の業務確認と切戻し条件を明記"] }
+        ]
+      },
+      {
+        "tutorialStepId": "install-target-ap",
+        "aiComment": "互換性を確認した構成を、前提ソフトウェアから順に新APへ導入します。",
+        "autoActions": [
+          { "label": "Java 8をインストール", "actor": "APSV02", "output": ["Java 8: インストール済み", "既存アプリ・Resinとの互換性を確認した構成です。"] },
+          { "label": "Resin 4.0をインストール", "actor": "APSV02", "output": ["Resin 4.0: インストール済み", "Windowsサービスの移行・起動は後続手順で行います。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "install-target-oracle",
+        "aiComment": "DBサービスを開始する前に、移行先へ対象バージョンを導入します。",
+        "autoActions": [
+          { "label": "Oracle Database 19cをインストール", "actor": "DBSV02", "output": ["Oracle Database 19c: インストール済み", "OracleServiceORCLとListenerの起動状態は次の手順で確認します。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "start-and-inspect-target-oracle",
+        "aiComment": "インストール済み表示だけで完了とせず、サービスと接続受付の状態を確認します。",
+        "autoActions": [
+          { "label": "OracleサービスとListenerを確認", "actor": "DBSV02", "command": "lsnrctl status", "output": ["OracleServiceORCL: 実行中", "Oracle Database 19c", "Listener status: READY"] }
+        ]
+      },
+      {
+        "tutorialStepId": "migrate-services",
+        "aiComment": "移行元のサービス定義をエクスポートし、新APへ取り込みます。取り込み後のサービスは起動前の状態です。",
+        "autoActions": [
+          { "label": "APSV01からサービスをエクスポート", "actor": "APSV01", "output": ["Resin Web Server (Resin) を移行パッケージへ出力しました。"] },
+          { "label": "APSV02へサービスをインポート", "actor": "APSV02", "output": ["Resin Web Server (Resin) を取り込みました。", "状態: 停止 (起動は後続手順で実施)"] }
+        ]
+      },
+      {
+        "tutorialStepId": "migrate-resin-config",
+        "aiComment": "設定ファイルを受け取った後、新APの待受IPとDB接続先を確認して保存します。",
+        "autoActions": [
+          { "label": "APSV01からresin.confをコピー", "actor": "APSV01", "output": ["resin.conf を移行パッケージへ出力しました。"] },
+          { "label": "APSV02の設定を修正して保存", "actor": "APSV02", "output": ["listen-address=10.10.2.21", "db-url=DBSV02:1521:ORCL", "修正した設定を保存しました。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "migrate-tasks",
+        "aiComment": "定期バッチは実行ファイルだけでなく、実行時刻と実行ユーザーも引き継ぎます。",
+        "autoActions": [
+          { "label": "APSV01からタスクをエクスポート", "actor": "APSV01", "output": ["DailyExcelExport / 毎日 02:00 / EXAMPLE\\svc_batch"] },
+          { "label": "APSV02へタスクをインポート", "actor": "APSV02", "output": ["DailyExcelExport を取り込みました。", "実行ファイル・スケジュール・実行ユーザーを確認してください。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "migrate-certificates",
+        "aiComment": "証明書本体と秘密鍵の有無を移行先で確認します。",
+        "autoActions": [
+          { "label": "APSV01から証明書をエクスポート", "actor": "APSV01", "output": ["CN=intra.example.local を移行パッケージへ出力しました。", "証明書に対応する秘密鍵を含めました。"] },
+          { "label": "APSV02へ証明書をインポート", "actor": "APSV02", "output": ["CN=intra.example.local: インポート済み", "秘密キー: あり"] }
+        ]
+      },
+      {
+        "tutorialStepId": "start-resin",
+        "aiComment": "設定と依存資産を確認した後、新APのサービスを起動します。",
+        "autoActions": [
+          { "label": "APSV02のResinを開始", "actor": "APSV02", "output": ["Resin Web Server: 実行中", "起動種類: 自動"] }
+        ]
+      },
+      {
+        "tutorialStepId": "verify-operational-readiness",
+        "aiComment": "サービスの再起動後の動作と、定期バッチの実行結果を確認します。",
+        "autoActions": [
+          { "label": "サービスの起動種類を確認", "actor": "APSV02", "output": ["Resin Web Server: 実行中", "起動種類: 自動"] },
+          { "label": "DailyExcelExportを試運転", "actor": "APSV02", "output": ["実行結果: 成功 (0x0)", "本番切替前に実行ユーザーと出力先も確認します。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "verify-connectivity",
+        "aiComment": "DNSを切り替える前に、新APへ直接接続してアプリケーションの応答を確認します。",
+        "autoActions": [
+          { "label": "新APへHTTP疎通", "actor": "APSV02", "command": "curl http://APSV02:8080/", "output": ["HTTP/1.1 200 OK", "DNS切替前の直接接続を確認しました。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "cutover-dns",
+        "aiComment": "Go判定後にAレコードを切り替え、権威DNSの接続先を確認します。",
+        "autoActions": [
+          { "label": "Aレコードを新APへ切替", "actor": "DNS01", "output": ["intra.example.local → APSV02 (10.10.2.21)", "TTL: 300 seconds"] }
+        ]
+      },
+      {
+        "tutorialStepId": "verify-post-cutover",
+        "aiComment": "DNS切替後はクライアントキャッシュを更新し、本番名経由の応答を確認します。",
+        "autoActions": [
+          { "label": "DNSキャッシュを更新", "actor": "APSV02", "command": "ipconfig /flushdns", "output": ["Successfully flushed the DNS Resolver Cache."] },
+          { "label": "本番名でHTTP疎通", "actor": "APSV02", "command": "curl http://intra.example.local:8080/", "output": ["HTTP/1.1 200 OK", "intra.example.local は APSV02 に解決されました。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "investigate-events",
+        "aiComment": "障害が見つからない場合も、ログにエラーがないことを確認して記録します。エラーがあれば発生元・時刻・内容から原因を絞り、復旧できなければ切戻し条件に従います。",
+        "autoActions": [
+          { "label": "APSV02のアプリケーションログを確認", "actor": "APSV02", "output": ["Error: 0 件 · Warning: 0 件", "この成功経路では障害ログはありません。イベントビューアーが空であることは、確認結果と一致します。"] }
+        ]
+      },
+      {
+        "tutorialStepId": "inspect-network-routes",
+        "aiComment": "APとDBの両方で経路表を確認し、接続元ごとのネットワーク経路を比較します。",
+        "autoActions": [
+          { "label": "APSV01の経路表を確認", "actor": "APSV01", "command": "route print", "output": ["APSV01 interface: 10.10.1.21", "Default gateway: 10.10.1.1", "Connected network: 10.10.1.0/24"] },
+          { "label": "DBSV01の経路表を確認", "actor": "DBSV01", "command": "route print", "output": ["DBSV01 interface: 10.10.1.31", "Default gateway: 10.10.1.1", "Connected network: 10.10.1.0/24"] }
         ]
       }
     ]

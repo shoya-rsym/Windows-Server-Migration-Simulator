@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import scenarioDefinition from "../data/scenarios/windows-server-2016-to-2019.json";
+import { createObservationPreview } from "./observation";
 import { loadScenario } from "./scenario";
+import { runCommand } from "./simulator";
 
 describe("scenario integrity validation", () => {
   it("rejects duplicate asset identifiers", () => {
@@ -103,8 +105,10 @@ describe("scenario integrity validation", () => {
     const scenario = loadScenario(scenarioDefinition);
 
     expect(scenario.storyMode?.enabled).toBe(true);
-    expect(scenario.storyMode?.steps).toHaveLength(16);
+    expect(scenario.storyMode?.steps).toHaveLength(33);
     expect(scenario.tutorialSteps).toHaveLength(33);
+    expect(scenario.storyMode?.steps.map((step) => step.tutorialStepId).sort())
+      .toEqual(scenario.tutorialSteps.map((step) => step.id).sort());
     expect(scenario.storyMode?.steps.map((step) => step.tutorialStepId)).toContain("reduce-dns-ttl");
     expect(scenario.storyMode?.steps.find((step) => step.tutorialStepId === "review-project-mail")?.quiz).toBeDefined();
     expect(scenario.tutorialSteps.map((step) => step.id)).toContain("review-project-meeting");
@@ -130,5 +134,96 @@ describe("scenario integrity validation", () => {
     storyStep.tutorialStepId = "missing-tutorial-step";
 
     expect(() => loadScenario(invalidScenario)).toThrow("観察モードが参照するチュートリアル手順がありません");
+  });
+
+  it("shows imported service state in the observation preview without mutating the scenario", () => {
+    const scenario = loadScenario(scenarioDefinition);
+    const initialTarget = createObservationPreview(scenario, "inspect-os").environments["ap-new"];
+    const preview = createObservationPreview(scenario, "migrate-services");
+    const target = preview.environments["ap-new"];
+
+    expect(initialTarget.services).toEqual([]);
+    expect(target.services).toMatchObject([
+      { name: "Resin", serverId: "ap-new", status: "stopped" },
+    ]);
+    expect(preview.environments["ap-old"].services).toMatchObject([
+      { name: "Resin", serverId: "ap-old", status: "running" },
+    ]);
+  });
+
+  it("keeps the Java and Oracle story output identical to the simulated commands", () => {
+    const scenario = loadScenario(scenarioDefinition);
+    const preview = createObservationPreview(scenario, "inspect-os");
+    const javaServer = scenario.assets.servers.find((server) => server.id === "ap-old");
+    const databaseServer = scenario.assets.servers.find((server) => server.id === "db-old");
+    const javaAction = scenario.storyMode?.steps.find((step) => step.tutorialStepId === "inspect-java")?.autoActions[0];
+    const oracleAction = scenario.storyMode?.steps.find((step) => step.tutorialStepId === "inspect-oracle-source")?.autoActions[0];
+    if (!javaServer || !databaseServer || !javaAction || !oracleAction) {
+      throw new Error("Observation command fixtures are missing.");
+    }
+
+    expect(javaAction.output).toEqual(runCommand(
+      javaAction.command ?? "",
+      javaServer,
+      scenario,
+      preview.environments[javaServer.id],
+      preview.environments,
+      preview.dns,
+    ).output);
+    expect(oracleAction.output).toEqual(runCommand(
+      oracleAction.command ?? "",
+      databaseServer,
+      scenario,
+      preview.environments[databaseServer.id],
+      preview.environments,
+      preview.dns,
+    ).output);
+  });
+
+  it("shows successful direct and post-cutover connectivity in the observation preview", () => {
+    const scenario = loadScenario(scenarioDefinition);
+    const directPreview = createObservationPreview(scenario, "verify-connectivity");
+    const target = scenario.assets.servers.find((server) => server.id === "ap-new");
+    if (!target) throw new Error("Observation scenario target AP is missing.");
+
+    const directResult = runCommand(
+      "curl http://APSV02:8080/",
+      target,
+      scenario,
+      directPreview.environments[target.id],
+      directPreview.environments,
+      directPreview.dns,
+    );
+    expect(directResult.output[0]).toBe("HTTP/1.1 200 OK");
+
+    const cutoverPreview = createObservationPreview(scenario, "verify-post-cutover");
+    expect(cutoverPreview.dns.address).toBe(target.ipAddress);
+    expect(cutoverPreview.dns.cachedAddress).toBe(target.ipAddress);
+  });
+
+  it("shows completed project evidence in the observation screens", () => {
+    const scenario = loadScenario(scenarioDefinition);
+    const notesPreview = createObservationPreview(scenario, "record-investigation-notes");
+    const teamsPreview = createObservationPreview(scenario, "review-project-teams");
+    const meetingPreview = createObservationPreview(scenario, "review-project-meeting");
+    const effortPreview = createObservationPreview(scenario, "review-project-effort");
+    const noticePreview = createObservationPreview(scenario, "send-user-notice");
+
+    expect(notesPreview.projectWorkspace.investigationNotes).toHaveLength(3);
+    expect(teamsPreview.projectWorkspace.chatResponses).toHaveLength(2);
+    expect(meetingPreview.projectWorkspace.meetingRecords).toHaveLength(scenario.projectMeetings.length);
+    expect(createObservationPreview(scenario, "map-architecture").projectWorkspace.architectureEdges)
+      .toHaveLength(scenario.project.dependencies.length);
+    expect(effortPreview.projectWorkspace).toMatchObject({
+      estimatedPersonHours: scenario.projectEffortPackages.reduce((total, item) => total + item.actualPersonHours, 0),
+      estimateDocumentId: "operations-manual",
+      estimateSectionId: "operations-window",
+    });
+    expect(noticePreview.projectWorkspace).toMatchObject({
+      noticeSent: true,
+      noticeLeadDays: 1,
+      noticeSubject: expect.any(String),
+      noticeBody: expect.stringContaining("お問い合わせ先"),
+    });
   });
 });
