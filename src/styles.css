@@ -630,14 +630,17 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .case-study-question-title small { color: #75859a; font-size: 11px; }
 .case-study-question-panel h2 { margin: 0 0 16px; color: #293e59; font-size: 18px; line-height: 1.55; }
 .case-study-choices { display: grid; gap: 8px; }
-.case-study-choice { min-height: 52px; display: flex; align-items: flex-start; gap: 11px; padding: 11px 12px; text-align: left; color: #455970; border: 1px solid #dce4ed; border-radius: 7px; background: #fff; font-size: 13px; line-height: 1.55; }
+.case-study-choice { min-height: 52px; display: flex; align-items: flex-start; gap: 11px; padding: 11px 12px; text-align: left; color: #455970; border: 1px solid #dce4ed; border-radius: 7px; background: #fff; font-size: 13px; line-height: 1.55; cursor: pointer; }
 .case-study-choice:hover { border-color: #9db9d8; background: #f7faff; }
 .case-study-choice.selected { color: #284f78; border-color: #5593d0; background: #eef6ff; box-shadow: 0 0 0 2px #4e8bc31a; }
+.case-study-choice input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.case-study-choice:focus-within { outline: 2px solid #8eb6de; outline-offset: 2px; }
 .case-study-choice-marker { flex: 0 0 auto; width: 22px; height: 22px; display: grid; place-items: center; margin-top: 1px; color: #62758b; border: 1px solid #d3dce7; border-radius: 50%; background: #f7f9fc; font-size: 11px; font-weight: 750; }
 .case-study-choice.selected .case-study-choice-marker { color: #fff; border-color: #4384c1; background: #4384c1; }
 .case-study-verdict { display: flex; align-items: center; gap: 11px; padding: 12px 14px; border: 1px solid; border-radius: 7px; }
 .case-study-verdict.correct { color: #397750; border-color: #cfe5d6; background: #f0f8f2; }
 .case-study-verdict.incorrect { color: #9a5d2f; border-color: #efd5b8; background: #fff7ec; }
+.case-study-verdict.balanced { color: #486c90; border-color: #d3e2f0; background: #f2f7fc; }
 .case-study-verdict > div { display: grid; gap: 3px; }
 .case-study-verdict strong { font-size: 15px; }
 .case-study-verdict span { color: #69798b; font-size: 11px; }
@@ -660,13 +663,40 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .case-study-explanation h2,.case-study-senior-review h2 { margin: 0; color: #3d536d; font-size: 13px; }
 .case-study-senior-review { border-color: #dce8f4; background: #f6f9fd; }
 .case-study-senior-review .case-study-section-icon { color: #4d7da9; background: #e9f2fb; }
-.case-study-selected-answer,.case-study-correct-answer { padding-top: 7px; border-top: 1px solid #e6ebf1; }
+.case-study-review-basis,.case-study-rehearsal,.case-study-option-comparison { margin-top: 12px; padding: 14px; border: 1px solid #dce5ef; border-radius: 7px; background: #fff; }
+.case-study-review-basis h2,.case-study-option-comparison h2 { margin: 0 0 10px; color: #3d536d; font-size: 13px; }
+.case-study-review-basis > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.case-study-review-basis > div > span { padding: 6px 9px; color: #415b76; border: 1px solid #dfe7ef; border-radius: 5px; background: #f6f9fc; font-size: 11px; }
+.case-study-rehearsal { border-color: #dae6f2; background: #f5f9fd; }
+.case-study-rehearsal strong { color: #416c92; font-size: 13px; }
+.case-study-rehearsal p { margin: 6px 0 0; color: #52657a; font-size: 12px; line-height: 1.55; }
+.case-study-option-comparison { display: grid; gap: 8px; }
+.case-study-option-comparison article { padding: 10px; border: 1px solid #e1e7ef; border-radius: 6px; background: #fbfcfe; }
+.case-study-option-comparison article.chosen { border-color: #7aa6d2; background: #f1f7fd; box-shadow: inset 3px 0 #4f87bd; }
+.case-study-option-comparison article header { display: flex; justify-content: space-between; gap: 10px; color: #526981; font-size: 11px; }
+.case-study-option-comparison article header span { color: #3d709c; white-space: nowrap; font-weight: 750; }
+.case-study-option-comparison article > p { margin: 6px 0; color: #344b65; font-size: 12px; line-height: 1.55; }
+.case-study-option-comparison article > div { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; color: #64758a; font-size: 11px; line-height: 1.5; }
+.case-study-rationale-factors { min-width: 0; margin: 13px 0 0; padding: 11px 12px 12px; border: 1px solid #dce4ed; border-radius: 7px; background: #fff; }
+.case-study-rationale-factors legend { padding: 0 5px; color: #485e77; font-size: 12px; font-weight: 750; }
+.case-study-rationale-factors legend small { color: #7d8da0; font-weight: 500; }
+.case-study-rationale-factors > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.case-study-rationale-factors label { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; color: #52657a; border: 1px solid #dfe6ee; border-radius: 5px; background: #fbfcfe; font-size: 11px; cursor: pointer; }
+.case-study-rationale-factors input { accent-color: #4384c1; }
+.case-study-glossary { margin-top: 12px; padding: 13px 14px; border: 1px solid #dce5ef; border-radius: 7px; background: #fff; }
+.case-study-glossary h2 { margin: 0 0 9px; color: #3d536d; font-size: 13px; }
+.case-study-glossary > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.case-study-glossary button { padding: 5px 9px; color: #426a8d; border: 1px solid #d5e2ef; border-radius: 14px; background: #f5f9fd; font-size: 11px; }
+.case-study-glossary button.active,.case-study-glossary button:hover { color: #fff; border-color: #4a82b2; background: #4a82b2; }
+.case-study-glossary article { margin-top: 9px; padding: 10px; border-left: 3px solid #6b9bce; background: #f5f9fd; }
+.case-study-glossary article strong { color: #3d6488; font-size: 12px; }
+.case-study-glossary article p { margin: 4px 0 0; color: #53677d; font-size: 12px; line-height: 1.55; }
 .case-study-rationale { display: grid; gap: 6px; margin-top: 12px; color: #485e77; font-size: 12px; font-weight: 700; }
 .case-study-rationale small { color: #7d8da0; font-weight: 500; }
 .case-study-rationale textarea { width: 100%; min-height: 58px; resize: vertical; padding: 9px 10px; color: #344a63; border: 1px solid #d6e0ea; border-radius: 5px; background: white; font-size: 12px; line-height: 1.5; }
 .case-study-rationale textarea:focus { outline: 2px solid #a9c8e8; border-color: #6a9bc9; }
 .case-study-summary-eyebrow { color: #4b83b6; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
-.case-study-total-score { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; margin: 18px 0; }
+.case-study-total-score { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 9px; margin: 18px 0; }
 .case-study-total-score > div { display: grid; gap: 5px; padding: 13px; border: 1px solid #dce5ef; border-radius: 7px; background: #fff; }
 .case-study-total-score span { color: #6c7d91; font-size: 11px; }
 .case-study-total-score strong { color: #315a82; font-size: 20px; }

@@ -20,18 +20,32 @@ export interface CaseQuestion {
   id: string;
   question: string;
   choices: string[];
-  correctAnswers: number[];
+  highestFitChoices: number[];
+  choiceReviews: CaseChoiceReview[];
   explanation: string;
   consequenceGood: string;
   consequenceBad: string;
   seniorReview: string;
   judgmentDimension: CaseJudgmentDimension;
+  reviewBasis: string[];
+  rationaleFactors: string[];
+  glossaryTerms: string[];
+  rehearsal?: {
+    result: string;
+    implication: string;
+  };
   failureScenario: {
     title: string;
     description: string;
     impact: string;
     flow: string[];
   };
+}
+
+export interface CaseChoiceReview {
+  benefit: string;
+  cost: string;
+  fit: number;
 }
 
 export interface CaseStudyScenario {
@@ -47,12 +61,15 @@ export interface CaseStudyScenario {
 export interface CaseStudyAnswer {
   caseId: string;
   judgmentDimension: CaseJudgmentDimension;
-  correct: boolean;
+  choiceIndex: number;
+  fit: number;
+  rationaleFactors: string[];
   rationale: string;
 }
 
 export interface CaseJudgmentScore {
-  correct: number;
+  points: number;
+  maxPoints: number;
   total: number;
   percentage: number | null;
 }
@@ -74,6 +91,10 @@ interface CaseVariant {
   dependencies: string[];
   details: string[];
   question: string;
+  rehearsal?: {
+    result: string;
+    implication: string;
+  };
 }
 
 interface CaseTemplate {
@@ -93,6 +114,102 @@ interface CaseTemplate {
   failureFlow: string[];
   variants: Record<CaseStudyDifficulty, CaseVariant>;
 }
+
+interface TradeoffOption {
+  text: string;
+  benefit: string;
+  cost: string;
+}
+
+const tradeoffOptions: Record<string, TradeoffOption[]> = {
+  DNS: [
+    { text: "利用者経路ごとに名前解決先を確認し、旧TTLの満了を確認してから段階的に切り替える", benefit: "利用者間の接続先のばらつきを抑え、観測結果に基づいて進められる", cost: "事前調整と複数拠点での確認に時間がかかる" },
+    { text: "予定どおり切り替え、監視と問い合わせ件数を見ながら短い間隔で継続判断する", benefit: "停止枠を維持し、影響の有無を早期に把握できる", cost: "キャッシュ残留が大きいと、一時的に接続先が分かれる" },
+    { text: "切替枠を延長または延期し、DNS担当と利用部門の確認時間を確保する", benefit: "不確実なキャッシュや承認を解消してから作業できる", cost: "顧客・利用部門の再調整と日程変更が必要になる" },
+    { text: "旧環境を期限付きで維持し、書込み制御・利用者誘導・切戻し条件を決めて段階移行する", benefit: "接続先が残る利用者への代替経路を確保できる", cost: "新旧の運用・データ整合性管理が複雑になる" },
+  ],
+  "Active Directory": [
+    { text: "利用者とサービスアカウントを分け、ドメイン到達性・グループ・権限を代表ケースで確認する", benefit: "影響範囲を絞り、過剰な権限変更を避けられる", cost: "複数の認証主体と経路を調査する工数がかかる" },
+    { text: "現行の認証設定を維持して切り替え、認証ログを監視しながら対象を限定して確認する", benefit: "大規模な構成変更を避けて短期間で切替できる", cost: "事前検証が不足すると障害発見が本番後になる" },
+    { text: "認証依存の確認が終わるまで切替を延期し、AD担当を交えた疎通試験を行う", benefit: "認証経路の不明点を残したまま本番化するリスクを下げる", cost: "関係者調整と利用者への日程再周知が必要になる" },
+    { text: "対象ユーザーを限定した段階切替を行い、失敗時の旧経路と権限復旧手順を準備する", benefit: "全利用者への一斉影響を避けながら実環境で確認できる", cost: "新旧ポリシー・権限を並行管理する期間が生じる" },
+  ],
+  Oracle: [
+    { text: "停止可能時間・更新量を実測し、Data Pump等の停止移行が枠内に収まる条件を確認する", benefit: "構成を単純に保ち、データ移行の手順と責任範囲を明確にできる", cost: "業務停止と十分な事前リハーサル時間が必要になる" },
+    { text: "停止枠内の切替を前提に、対象範囲を絞った移行を実施して監視付きで進める", benefit: "日程・費用を抑え、停止枠を守れる可能性がある", cost: "移行時間や互換性の余裕が小さく、超過時の判断が難しい" },
+    { text: "更新量と停止上限が合わなければ、レプリケーション等の方式をDBAと評価して日程を再計画する", benefit: "短い停止枠や大容量DBに合わせた同期方式を検討できる", cost: "構築・監視・ライセンス・運用のコストと複雑性が増す" },
+    { text: "移行対象を分割し、優先業務を先行して残りは合意した段階で移行する", benefit: "一度に扱う変更範囲を減らし、段階的に検証できる", cost: "依存関係と一時的な新旧連携の設計が必要になる" },
+  ],
+  "Data Pump": [
+    { text: "事前リハーサルを計測し、更新停止後の最終同期・件数照合まで含めて実行可能性を確認する", benefit: "実測時間とデータ整合性を根拠に切替可否を判断できる", cost: "リハーサル環境・担当者・停止調整の工数が必要になる" },
+    { text: "初回Import後に短い停止枠で最終差分を反映し、重要データを優先して照合する", benefit: "業務停止を限定しつつ更新差分を反映できる", cost: "差分抽出・反映方法が不十分だと欠損を見逃す" },
+    { text: "差分量・所要時間が枠に収まらない場合は切替を延期し、同期方式と停止計画を見直す", benefit: "未検証の移行を本番で強行するリスクを避けられる", cost: "日程変更と利用者・関係者の再調整が必要になる" },
+    { text: "重要表を先に照合し、残りは合意した検証時間内にサンプリングと業務試験で確認する", benefit: "停止枠を意識しながら重要データの異常を優先検出できる", cost: "全件照合ではないため、サンプリング設計と残余リスクの承認が要る" },
+  ],
+  JDBC: [
+    { text: "全APノードのJDBC接続先を照合し、保存後に新DBへの接続と試験書込みを確認する", benefit: "接続先の取り違えを切替前に検出し、証跡を残せる", cost: "ノードごとの設定確認と試験データの後処理が必要になる" },
+    { text: "接続先変更を先行して適用し、接続プールを再生成して監視付きで切り替える", benefit: "切替当日の作業を減らし、早めに疎通確認できる", cost: "本番経路へ早く影響し、設定差分の管理が必要になる" },
+    { text: "DB接続設定の不一致が解消するまで本番切替を保留し、担当者立会いで再試験する", benefit: "誤ったDBへの書込みを避けられる", cost: "切替延期と関係者の再調整が発生する" },
+    { text: "段階的にAPノードを切り替え、接続先・書込み・プール状態をノードごとに確認する", benefit: "問題発生時に対象ノードを限定しやすい", cost: "一時的な混在状態とデータ整合性の管理が必要になる" },
+  ],
+  "利用者周知": [
+    { text: "対象業務・日時・停止影響・事前準備・問い合わせ先を明示して複数経路で事前周知する", benefit: "利用者が業務影響を理解し、必要な準備を行える", cost: "対象者の棚卸しと文面確認に時間がかかる" },
+    { text: "既存の標準連絡経路で要点を早めに通知し、未達・問い合わせを追跡する", benefit: "迅速に広く知らせ、標準運用に沿って記録できる", cost: "複雑な対象者や外部利用者が配信対象から漏れる可能性がある" },
+    { text: "影響範囲と時間が確定するまで通知を保留し、業務責任者と再計画する", benefit: "不確かな予定を誤って確約するのを防げる", cost: "通知が遅れて利用者の準備時間を短くする" },
+    { text: "重要利用者へ先行連絡し、全体通知は確定情報とFAQを揃えて段階的に行う", benefit: "影響の大きい部門と早期に調整できる", cost: "複数回の連絡を管理し、説明内容の一貫性を保つ必要がある" },
+  ],
+  "Go/No-Go": [
+    { text: "必須条件・証跡・残リスクを確認し、業務責任者を含む判定者がGo/No-Goを記録する", benefit: "判断根拠と責任者を共有し、未完了事項を可視化できる", cost: "関係者を揃える時間と、条件未達時に止める決断が必要になる" },
+    { text: "合意済みの停止枠を優先し、未完了項目を担当・期限付きで管理して限定的に進める", benefit: "全ての軽微な残項目で日程を止めずに済む", cost: "残項目の影響評価と明示的な受容判断が欠かせない" },
+    { text: "未完了の必須条件がある場合はNo-Goとし、解消後の再判定を設定する", benefit: "重大な不確実性を本番へ持ち込まない", cost: "延期による業務・顧客・要員の再調整が発生する" },
+    { text: "影響を限定した段階切替を提案し、監視閾値と即時中断条件を合意する", benefit: "全体切替前に実環境で影響を観測できる", cost: "二重運用・切替制御・監視の準備負荷が増える" },
+  ],
+  "切戻し": [
+    { text: "合意済み閾値と残り時間を確認し、責任者・DBA・業務側でデータ状態を含めて判断する", benefit: "影響と復旧可能性に基づく一貫した判断ができる", cost: "関係者の即時招集と迅速な状況共有が必要になる" },
+    { text: "復旧見込みが期限内なら対象を絞って修正し、短い間隔で継続可否を再評価する", benefit: "原因が限定されている場合は切戻しコストを避けられる", cost: "判断期限を超えないよう監視と中止条件が必要になる" },
+    { text: "影響閾値または判定期限を超えたら新規更新を止め、承認の上で切り戻す", benefit: "利用者影響の拡大を抑え、計画された復旧経路を使える", cost: "日程・顧客影響が生じ、新環境の更新差分を処理する必要がある" },
+    { text: "書込みを一時保留し、データ保全と影響範囲の把握後に続行・切戻しを選ぶ", benefit: "不整合を増やさず判断材料を確保できる", cost: "業務停止が続き、保留中のデータ処理を管理する必要がある" },
+  ],
+  "証明書": [
+    { text: "クライアント視点で名前・期限・チェーン・秘密鍵・バインドを検証し、更新担当も決める", benefit: "利用者経路と運用期限の両方を確認できる", cost: "複数クライアントと権限を含む検証準備が必要になる" },
+    { text: "現行証明書構成を維持して切り替え、主要クライアントのTLS監視を強化する", benefit: "構成変更を抑えて既存運用を活用できる", cost: "ホスト名やチェーン差異を見逃すと利用者環境で失敗する" },
+    { text: "証明書チェーンまたは秘密鍵の検証が未完了なら切替を延期して再発行・再試験する", benefit: "信頼できないTLS状態で公開することを避けられる", cost: "証明書発行者や顧客の調整で日程が延びる" },
+    { text: "影響の少ない経路で先行試験し、問題なければ段階的にバインドを切り替える", benefit: "クライアント差分を段階的に見つけられる", cost: "一時的に新旧証明書・経路の併存を管理する必要がある" },
+  ],
+  "バッチ": [
+    { text: "実行ユーザー・時刻・作業フォルダー・権限・出力・終了コードを本番相当で試験する", benefit: "定義だけでなく業務成果物まで確認できる", cost: "試験データ・アクセス権・後処理を準備する必要がある" },
+    { text: "初回は監視付きで予定どおり実行し、担当者がログと成果物を確認する", benefit: "移行直後の運用負荷を抑えて実際の実行結果を確認できる", cost: "事前試験で見つかるはずの失敗が本番時間帯に出る可能性がある" },
+    { text: "実行条件や重複防止が不明なジョブは有効化せず、業務担当と実行時刻を再調整する", benefit: "誤実行・二重送信による業務影響を防ぎやすい", cost: "帳票や連携が遅延し、利用部門への連絡が必要になる" },
+    { text: "ジョブを段階的に有効化し、依存順・重複防止・監視通知を一件ずつ確認する", benefit: "障害の発生箇所を限定し、連鎖実行を防ぎやすい", cost: "旧新タスクの状態と一時運用を丁寧に管理する必要がある" },
+  ],
+};
+
+const rationaleFactorLabels = [
+  "利用者数",
+  "停止可能時間",
+  "DB容量・更新量",
+  "影響範囲",
+  "切戻し時間",
+  "顧客・利用部門の要望",
+  "SLA・サービス条件",
+];
+
+export const caseGlossary = [
+  { term: "権威DNS", definition: "ドメイン名の正式なDNSレコードを管理し、問い合わせに対して確定した情報を返すDNSサーバーです。", terms: ["権威DNS"] },
+  { term: "TTL", definition: "DNS応答をキャッシュしてよい時間です。86400秒は24時間に相当し、短縮後も旧TTLのキャッシュ満了を見込む必要があります。", terms: ["TTL"] },
+  { term: "DNSキャッシュ", definition: "名前解決の結果を一時保存した情報です。切替後も保存済みの旧IPを返すことがあります。", terms: ["DNSキャッシュ", "キャッシュ"] },
+  { term: "Data Pump", definition: "Oracle Databaseの論理データ移行機能です。Export/Import実行後の更新差分と整合性確認も移行計画に含めます。", terms: ["Data Pump", "Export", "Import"] },
+  { term: "差分同期", definition: "初回移行後に発生した追加・更新データを移行先へ反映する作業です。更新停止点と同期完了の検証が必要です。", terms: ["差分同期", "最終同期"] },
+  { term: "JDBC", definition: "Javaアプリケーションがデータベースへ接続するための標準APIです。接続先設定はWeb用DNS切替とは独立しています。", terms: ["JDBC"] },
+  { term: "接続プール", definition: "DB接続を再利用する仕組みです。接続先設定変更後に古い接続が残る場合は再生成・再起動を検討します。", terms: ["接続プール"] },
+  { term: "Active Directory", definition: "ユーザー・グループ・コンピューターの認証やポリシーを管理するディレクトリサービスです。", terms: ["Active Directory", "AD"] },
+  { term: "サービスアカウント", definition: "バッチやサービスが人の操作なしで処理を実行するためのアカウントです。権限と資格情報を個別に確認します。", terms: ["サービスアカウント"] },
+  { term: "Go/No-Go", definition: "定めた必須条件・残リスク・業務影響を確認し、本番作業を進めるか止めるかを決める判定です。", terms: ["Go/No-Go", "Go", "No-Go"] },
+  { term: "切戻し", definition: "切替後の障害時に旧環境へ戻す手順です。通信経路だけでなく、切替後のDB更新をどう扱うかも必要です。", terms: ["切戻し"] },
+  { term: "証明書チェーン", definition: "サーバー証明書から中間CA・ルートCAへ連なる信頼関係です。中間証明書が配信されないと一部クライアントで失敗します。", terms: ["証明書チェーン", "中間証明書"] },
+  { term: "冪等性", definition: "同じ処理を複数回実行しても結果が重複・変化しない性質です。バッチの再試行や外部送信で重要です。", terms: ["冪等性", "重複防止"] },
+  { term: "リハーサル", definition: "本番と同等の手順・データ量で事前実行し、時間・手順・失敗条件を実測する練習です。", terms: ["リハーサル", "試験", "実測"] },
+];
 
 const templates: CaseTemplate[] = [
   {
@@ -979,6 +1096,107 @@ const templates: CaseTemplate[] = [
 
 export const caseStudyDifficulties: CaseStudyDifficulty[] = ["easy", "normal", "hard"];
 
+const fitScores: Record<string, Record<CaseStudyDifficulty, [number, number, number, number]>> = {
+  "dns-ttl": { easy: [3, 2, 1, 2], normal: [3, 1, 2, 2], hard: [2, 1, 3, 2] },
+  "dns-split": { easy: [3, 2, 2, 2], normal: [3, 1, 2, 2], hard: [2, 1, 3, 2] },
+  "ad-membership": { easy: [3, 2, 1, 2], normal: [3, 1, 2, 2], hard: [2, 1, 3, 2] },
+  "ad-trust": { easy: [3, 2, 1, 2], normal: [3, 1, 2, 2], hard: [2, 1, 3, 2] },
+  "oracle-window": { easy: [3, 2, 1, 2], normal: [2, 1, 3, 2], hard: [1, 0, 3, 2] },
+  "oracle-compatibility": { easy: [3, 2, 2, 1], normal: [3, 1, 2, 2], hard: [2, 1, 3, 2] },
+  "datapump-final-sync": { easy: [3, 2, 1, 2], normal: [3, 2, 1, 3], hard: [2, 1, 3, 2] },
+  "datapump-validation": { easy: [3, 2, 1, 2], normal: [3, 1, 2, 2], hard: [2, 1, 2, 3] },
+  "jdbc-endpoint": { easy: [3, 2, 1, 2], normal: [3, 2, 1, 3], hard: [2, 1, 2, 3] },
+  "jdbc-secret": { easy: [3, 2, 1, 2], normal: [2, 2, 1, 3], hard: [2, 1, 3, 2] },
+  "user-notice": { easy: [3, 2, 1, 2], normal: [3, 2, 1, 3], hard: [2, 2, 3, 2] },
+  "user-audience": { easy: [3, 2, 1, 2], normal: [2, 2, 1, 3], hard: [3, 1, 2, 2] },
+  "go-no-go-gates": { easy: [3, 2, 1, 2], normal: [2, 2, 3, 2], hard: [1, 1, 3, 2] },
+  "go-no-go-evidence": { easy: [3, 2, 1, 2], normal: [2, 2, 1, 3], hard: [3, 1, 2, 2] },
+  "rollback-window": { easy: [3, 2, 2, 2], normal: [3, 2, 3, 2], hard: [2, 1, 3, 3] },
+  "rollback-data": { easy: [3, 2, 1, 2], normal: [3, 1, 2, 2], hard: [2, 1, 3, 2] },
+  "certificate-private-key": { easy: [3, 2, 1, 2], normal: [3, 2, 1, 2], hard: [2, 1, 3, 2] },
+  "certificate-chain": { easy: [3, 2, 2, 1], normal: [3, 2, 1, 2], hard: [2, 1, 3, 2] },
+  "batch-schedule": { easy: [3, 2, 1, 2], normal: [2, 2, 1, 3], hard: [2, 1, 3, 2] },
+  "batch-identity": { easy: [3, 2, 1, 2], normal: [2, 2, 1, 3], hard: [2, 1, 2, 3] },
+};
+
+function getReviewBasis(variant: CaseVariant): string[] {
+  return [
+    `利用者数: ${variant.users.toLocaleString()}人`,
+    `停止可能時間: ${variant.downtimeMinutes}分`,
+    ...(variant.databases ?? []),
+    ...variant.details,
+    `依存関係: ${variant.dependencies.join("・")}`,
+  ];
+}
+
+function getRationaleFactors(variant: CaseVariant): string[] {
+  const details = variant.details.join(" ");
+  return rationaleFactorLabels.filter((factor) => {
+    if (factor === "利用者数") return true;
+    if (factor === "停止可能時間") return true;
+    if (factor === "DB容量・更新量") return Boolean(variant.databases?.length)
+      || /データ量|更新|差分|Export|Import|同期/i.test(details);
+    if (factor === "影響範囲") return variant.users >= 1000 || variant.dependencies.length > 2;
+    if (factor === "切戻し時間") return /切戻し|切り戻し|判断期限|停止枠/i.test(details);
+    if (factor === "顧客・利用部門の要望") return /顧客|利用部門|業務|承認/i.test(variant.background + details);
+    return /SLA|24時間|停止上限|規制|監査|決済/i.test(variant.background + details);
+  });
+}
+
+function getRehearsal(
+  template: CaseTemplate,
+  difficulty: CaseStudyDifficulty,
+  variant: CaseVariant,
+): CaseVariant["rehearsal"] | undefined {
+  if (variant.rehearsal) return variant.rehearsal;
+  if (template.category !== "Oracle" && template.category !== "Data Pump") return undefined;
+  if (difficulty === "easy") {
+    return {
+      result: "検証リハーサル: EXPDP 45分 + IMPDP 65分 (合計110分)",
+      implication: `停止可能時間 ${variant.downtimeMinutes}分と比較し、最終同期・照合を含めて収まるか判断します。`,
+    };
+  }
+  if (difficulty === "normal") {
+    return {
+      result: "検証リハーサル: 初回移行 80分 + 最終同期 55分 + 照合 25分 (合計160分)",
+      implication: `停止可能時間 ${variant.downtimeMinutes}分に対し、同じ停止時間が必要とは限りません。更新停止点と差分同期方式を再設計します。`,
+    };
+  }
+  return {
+    result: "本番想定リハーサル: 初回移行 130分 + 最終同期 35分 + 照合 20分 (合計185分)",
+    implication: `停止可能時間 ${variant.downtimeMinutes}分を超過します。Data Pump単独ではなく、更新同期方式や作業枠を再評価する根拠になります。`,
+  };
+}
+
+function getChoiceReviews(
+  template: CaseTemplate,
+  difficulty: CaseStudyDifficulty,
+): CaseChoiceReview[] {
+  const options = tradeoffOptions[template.category];
+  if (!options) throw new Error(`案件カテゴリの判断選択肢がありません: ${template.category}`);
+  const scores = fitScores[template.id]?.[difficulty];
+  if (!scores) throw new Error(`案件条件に応じた適合度がありません: ${template.id}/${difficulty}`);
+  return options.map((option, index) => ({
+    benefit: option.benefit,
+    cost: option.cost,
+    fit: scores[index],
+  }));
+}
+
+function getJudgmentReview(
+  template: CaseTemplate,
+  variant: CaseVariant,
+  choiceReviews: CaseChoiceReview[],
+): string {
+  const bestFit = Math.max(...choiceReviews.map((review) => review.fit));
+  const bestOptions = choiceReviews
+    .map((review, index) => ({ review, index }))
+    .filter(({ review }) => review.fit === bestFit)
+    .map(({ index }) => tradeoffOptions[template.category][index].text);
+  const leadingOption = bestOptions.map((option) => `「${option}」`).join("または");
+  return `利用者${variant.users.toLocaleString()}人・停止可能時間${variant.downtimeMinutes}分を含む条件では、${leadingOption}が相対的に適合度の高い案です。最高評価でも利点だけではなくコストがあり、関係者の合意や追加情報によって別案が妥当になることがあります。${template.seniorReview}`;
+}
+
 export const caseJudgmentDimensions: Array<{
   id: CaseJudgmentDimension;
   title: string;
@@ -993,6 +1211,16 @@ export const caseJudgmentDimensions: Array<{
 export const caseStudyBank: CaseStudyScenario[] = templates.flatMap((template) =>
   caseStudyDifficulties.map((difficulty) => {
     const variant = template.variants[difficulty];
+    const optionReviews = getChoiceReviews(template, difficulty);
+    const reviewBasis = getReviewBasis(variant);
+    const rehearsal = getRehearsal(template, difficulty, variant);
+    const questionText = `${variant.question}最も適合する案を選んでください。`;
+    const relatedText = [
+      template.explanation,
+      template.seniorReview,
+      questionText,
+      ...tradeoffOptions[template.category].flatMap((option) => [option.text, option.benefit, option.cost]),
+    ].join(" ");
     return {
       id: `${template.id}-${difficulty}`,
       title: `${template.title} · ${difficultyLabels[difficulty]}`,
@@ -1009,14 +1237,21 @@ export const caseStudyBank: CaseStudyScenario[] = templates.flatMap((template) =
       },
       questions: [{
         id: `${template.id}-${difficulty}-q1`,
-        question: variant.question,
-        choices: template.choices,
-        correctAnswers: template.correctAnswers,
+        question: questionText,
+        choices: tradeoffOptions[template.category].map((option) => option.text),
+        highestFitChoices: optionReviews.flatMap((review, index) => review.fit === Math.max(...optionReviews.map((item) => item.fit)) ? [index] : []),
+        choiceReviews: optionReviews,
         explanation: template.explanation,
         consequenceGood: template.consequenceGood,
         consequenceBad: template.consequenceBad,
-        seniorReview: template.seniorReview,
+        seniorReview: getJudgmentReview(template, variant, optionReviews),
         judgmentDimension: template.dimension,
+        reviewBasis,
+        rationaleFactors: getRationaleFactors(variant),
+        glossaryTerms: caseGlossary
+          .filter(({ terms }) => terms.some((term) => relatedText.includes(term)))
+          .map(({ term }) => term),
+        rehearsal,
         failureScenario: {
           title: template.failureTitle,
           description: template.failureDescription,
@@ -1041,7 +1276,7 @@ export function shuffleCaseStudies(
     questions: scenario.questions.map((question) => {
       const options = question.choices.map((text, index) => ({
         text,
-        correct: question.correctAnswers.includes(index),
+        review: question.choiceReviews[index],
       }));
       for (let index = options.length - 1; index > 0; index -= 1) {
         const target = Math.floor(random() * (index + 1));
@@ -1050,7 +1285,8 @@ export function shuffleCaseStudies(
       return {
         ...question,
         choices: options.map((option) => option.text),
-        correctAnswers: options.flatMap((option, index) => option.correct ? [index] : []),
+        choiceReviews: options.map((option) => option.review),
+        highestFitChoices: options.flatMap((option, index) => option.review.fit === Math.max(...options.map((item) => item.review.fit)) ? [index] : []),
       };
     }),
   }));
@@ -1064,11 +1300,13 @@ export function shuffleCaseStudies(
 export function calculateCaseJudgmentScores(answers: readonly CaseStudyAnswer[]): CaseJudgmentScores {
   return Object.fromEntries(caseJudgmentDimensions.map(({ id }) => {
     const matching = answers.filter((answer) => answer.judgmentDimension === id);
-    const correct = matching.filter((answer) => answer.correct).length;
+    const points = matching.reduce((total, answer) => total + answer.fit, 0);
+    const maxPoints = matching.length * 3;
     return [id, {
-      correct,
+      points,
+      maxPoints,
       total: matching.length,
-      percentage: matching.length === 0 ? null : Math.round((correct / matching.length) * 100),
+      percentage: matching.length === 0 ? null : Math.round((points / maxPoints) * 100),
     }];
   })) as CaseJudgmentScores;
 }

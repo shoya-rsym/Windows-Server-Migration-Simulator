@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   calculateCaseJudgmentScores,
+  caseGlossary,
   caseJudgmentDimensions,
   getCaseStudies,
   shuffleCaseStudies,
@@ -39,13 +40,6 @@ const dimensionLabels: Record<CaseJudgmentDimension, string> = {
   rollbackJudge: "切戻し判断",
 };
 
-function isCorrectAnswer(selected: number[], correct: number[]): boolean {
-  const selectedSorted = [...selected].sort((a, b) => a - b);
-  const correctSorted = [...correct].sort((a, b) => a - b);
-  return selectedSorted.length === correctSorted.length
-    && selectedSorted.every((answer, index) => answer === correctSorted[index]);
-}
-
 export function CaseStudyPlayer({
   difficulty,
   onClose,
@@ -57,6 +51,8 @@ export function CaseStudyPlayer({
   const [caseIndex, setCaseIndex] = useState(0);
   const [phase, setPhase] = useState<PlayerPhase>("overview");
   const [selectedAnswers, setSelectedAnswers] = useState<number[]>([]);
+  const [selectedRationaleFactors, setSelectedRationaleFactors] = useState<string[]>([]);
+  const [openGlossaryTerm, setOpenGlossaryTerm] = useState<string | null>(null);
   const [answers, setAnswers] = useState<CaseStudyAnswer[]>([]);
   const [rationale, setRationale] = useState("");
 
@@ -66,20 +62,28 @@ export function CaseStudyPlayer({
   if (!question) throw new Error(`設問がありません: ${currentCase.id}`);
   const latestAnswer = answers.find((answer) => answer.caseId === currentCase.id);
   const score = calculateCaseJudgmentScores(answers);
-  const correctCount = answers.filter((answer) => answer.correct).length;
+  const points = answers.reduce((total, answer) => total + answer.fit, 0);
+  const maxPoints = answers.length * 3;
 
-  const toggleAnswer = (choiceIndex: number) => {
-    setSelectedAnswers((previous) => previous.includes(choiceIndex)
-      ? previous.filter((item) => item !== choiceIndex)
-      : [...previous, choiceIndex]);
+  const chooseAnswer = (choiceIndex: number) => {
+    setSelectedAnswers([choiceIndex]);
   };
 
   const submitAnswer = () => {
     if (selectedAnswers.length === 0) return;
-    const correct = isCorrectAnswer(selectedAnswers, question.correctAnswers);
+    const choiceIndex = selectedAnswers[0];
+    const fit = question.choiceReviews[choiceIndex]?.fit;
+    if (fit === undefined) throw new Error(`選択肢の評価がありません: ${currentCase.id}/${choiceIndex}`);
     setAnswers((previous) => [
       ...previous.filter((answer) => answer.caseId !== currentCase.id),
-      { caseId: currentCase.id, judgmentDimension: question.judgmentDimension, correct, rationale: "" },
+      {
+        caseId: currentCase.id,
+        judgmentDimension: question.judgmentDimension,
+        choiceIndex,
+        fit,
+        rationaleFactors: selectedRationaleFactors,
+        rationale: "",
+      },
     ]);
     setPhase("review");
   };
@@ -91,6 +95,8 @@ export function CaseStudyPlayer({
     }
     setCaseIndex((previous) => previous + 1);
     setSelectedAnswers([]);
+    setSelectedRationaleFactors([]);
+    setOpenGlossaryTerm(null);
     setRationale("");
     setPhase("overview");
   };
@@ -102,11 +108,24 @@ export function CaseStudyPlayer({
       : answer));
   };
 
+  const updateRationaleFactors = (factors: string[]) => {
+    setSelectedRationaleFactors(factors);
+    setAnswers((previous) => previous.map((answer) => answer.caseId === currentCase.id
+      ? { ...answer, rationaleFactors: factors }
+      : answer));
+  };
+
+  const toggleGlossary = (term: string) => {
+    setOpenGlossaryTerm((previous) => previous === term ? null : term);
+  };
+
   const startNewRound = () => {
     setDeck(shuffleCaseStudies(getCaseStudies(difficulty)));
     setCaseIndex(0);
     setAnswers([]);
     setSelectedAnswers([]);
+    setSelectedRationaleFactors([]);
+    setOpenGlossaryTerm(null);
     setRationale("");
     setPhase("overview");
   };
@@ -140,7 +159,9 @@ export function CaseStudyPlayer({
               difficulty={difficulty}
               answers={answers}
               score={score}
-              correctCount={correctCount}
+              points={points}
+              maxPoints={maxPoints}
+              rationaleCount={answers.filter((answer) => answer.rationale.trim() || answer.rationaleFactors.length > 0).length}
               deckSize={deck.length}
               onRestart={startNewRound}
               onClose={onClose}
@@ -168,7 +189,7 @@ export function CaseStudyPlayer({
                 <QuestionPanel
                   question={question}
                   selectedAnswers={selectedAnswers}
-                  onToggle={toggleAnswer}
+                  onChoose={chooseAnswer}
                   onSubmit={submitAnswer}
                 />
               )}
@@ -177,9 +198,12 @@ export function CaseStudyPlayer({
                 <CaseReview
                   question={question}
                   answer={latestAnswer}
-                  selectedAnswers={selectedAnswers}
+                  selectedRationaleFactors={selectedRationaleFactors}
                   rationale={rationale}
+                  openGlossaryTerm={openGlossaryTerm}
+                  onRationaleFactorsChange={updateRationaleFactors}
                   onRationaleChange={updateRationale}
+                  onGlossaryToggle={toggleGlossary}
                   onNext={continueToNextCase}
                   isLastCase={caseIndex === deck.length - 1}
                 />
@@ -224,40 +248,43 @@ function Condition({ label, value }: { label: string; value: string }) {
 function QuestionPanel({
   question,
   selectedAnswers,
-  onToggle,
+  onChoose,
   onSubmit,
 }: {
   question: CaseQuestion;
   selectedAnswers: number[];
-  onToggle: (choiceIndex: number) => void;
+  onChoose: (choiceIndex: number) => void;
   onSubmit: () => void;
 }) {
-  const multiple = question.correctAnswers.length > 1;
   return (
     <section className="case-study-question-panel">
       <div className="case-study-question-title">
         <span>設問</span>
-        <small>{multiple ? "複数選択" : "最も適切なものを1つ選択"}</small>
+        <small>利点とコストを比較し、条件に最も合う案を選択</small>
       </div>
       <h2>{question.question}</h2>
       <div className="case-study-choices">
         {question.choices.map((choice, index) => {
           const selected = selectedAnswers.includes(index);
           return (
-            <button
+            <label
               key={choice}
               className={`case-study-choice ${selected ? "selected" : ""}`}
-              aria-pressed={selected}
-              onClick={() => onToggle(index)}
             >
+              <input
+                type="radio"
+                name={`case-question-${question.id}`}
+                checked={selected}
+                onChange={() => onChoose(index)}
+              />
               <span className="case-study-choice-marker">{selected ? <Check size={15} /> : String.fromCharCode(65 + index)}</span>
               <span>{choice}</span>
-            </button>
+            </label>
           );
         })}
       </div>
       <div className="case-study-action-row">
-        <span>判断理由は回答後に任意で記録できます。</span>
+        <span>すべての選択肢に利点とコストがあります。唯一の正解探しではなく、条件との適合性を比べます。</span>
         <button className="case-study-primary" disabled={selectedAnswers.length === 0} onClick={onSubmit}>
           判断を確認 <ArrowRight size={16} />
         </button>
@@ -269,69 +296,112 @@ function QuestionPanel({
 function CaseReview({
   question,
   answer,
-  selectedAnswers,
+  selectedRationaleFactors,
   rationale,
+  openGlossaryTerm,
+  onRationaleFactorsChange,
   onRationaleChange,
+  onGlossaryToggle,
   onNext,
   isLastCase,
 }: {
   question: CaseQuestion;
   answer: CaseStudyAnswer;
-  selectedAnswers: number[];
+  selectedRationaleFactors: string[];
   rationale: string;
+  openGlossaryTerm: string | null;
+  onRationaleFactorsChange: (factors: string[]) => void;
   onRationaleChange: (value: string) => void;
+  onGlossaryToggle: (term: string) => void;
   onNext: () => void;
   isLastCase: boolean;
 }) {
-  const correctAnswerText = question.correctAnswers.map((index) => question.choices[index]).join(" / ");
+  const selectedReview = question.choiceReviews[answer.choiceIndex];
+  if (!selectedReview) throw new Error(`回答した選択肢の評価がありません: ${answer.caseId}`);
+  const toggleRationaleFactor = (factor: string) => {
+    onRationaleFactorsChange(selectedRationaleFactors.includes(factor)
+      ? selectedRationaleFactors.filter((item) => item !== factor)
+      : [...selectedRationaleFactors, factor]);
+  };
+  const definitions = caseGlossary.filter(({ term }) => question.glossaryTerms.includes(term));
   return (
     <section className="case-study-review">
-      <div className={`case-study-verdict ${answer.correct ? "correct" : "incorrect"}`}>
-        {answer.correct ? <CheckCircle2 size={21} /> : <AlertTriangle size={21} />}
+      <div className={`case-study-verdict ${answer.fit >= 3 ? "correct" : answer.fit <= 1 ? "incorrect" : "balanced"}`}>
+        {answer.fit >= 3 ? <CheckCircle2 size={21} /> : answer.fit <= 1 ? <AlertTriangle size={21} /> : <Lightbulb size={21} />}
         <div>
-          <strong>{answer.correct ? "適切な判断です" : "この判断ではリスクが残ります"}</strong>
-          <span>評価領域: {dimensionLabels[question.judgmentDimension]}</span>
+          <strong>{answer.fit >= 3 ? "条件に良く合った判断です" : answer.fit === 2 ? "成立する選択肢ですが、別のコストもあります" : "この条件では別案の方がリスクを抑えられます"}</strong>
+          <span>条件適合度 {answer.fit} / 3 · 評価領域: {dimensionLabels[question.judgmentDimension]}</span>
         </div>
       </div>
 
-      {answer.correct ? (
-        <article className="case-study-consequence good">
-          <strong>この判断の結果</strong>
-          <p>{question.consequenceGood}</p>
-        </article>
-      ) : (
-        <FailureSimulation question={question} />
-      )}
+      {answer.fit <= 1
+        ? <FailureSimulation question={question} />
+        : <article className="case-study-consequence good">
+          <strong>今回の選択で得られること / 引き受けるコスト</strong>
+          <p><b>利点:</b> {selectedReview.benefit}</p>
+          <p><b>注意点:</b> {selectedReview.cost}</p>
+        </article>}
 
       <article className="case-study-explanation">
         <div className="case-study-section-icon"><Lightbulb size={17} /></div>
         <div><h2>解説</h2><p>{question.explanation}</p></div>
       </article>
 
+      <section className="case-study-review-basis" aria-label="判断材料">
+        <h2>今回の判断材料</h2>
+        <div>{question.reviewBasis.map((fact) => <span key={fact}>{fact}</span>)}</div>
+      </section>
+
+      {question.rehearsal && <section className="case-study-rehearsal">
+        <strong>リハーサル結果</strong>
+        <p>{question.rehearsal.result}</p>
+        <p>{question.rehearsal.implication}</p>
+      </section>}
+
+      <section className="case-study-option-comparison">
+        <h2>選択肢のトレードオフ比較</h2>
+        {question.choices.map((choice, index) => {
+          const review = question.choiceReviews[index];
+          const chosen = index === answer.choiceIndex;
+          if (!review) throw new Error(`選択肢の比較情報がありません: ${question.id}/${index}`);
+          return <article className={chosen ? "chosen" : ""} key={choice}>
+            <header><strong>{String.fromCharCode(65 + index)} · {chosen ? "あなたの選択" : "比較案"}</strong><span>適合度 {review.fit} / 3</span></header>
+            <p>{choice}</p>
+            <div><span><b>利点:</b> {review.benefit}</span><span><b>コスト・リスク:</b> {review.cost}</span></div>
+          </article>;
+        })}
+      </section>
+
       <article className="case-study-senior-review">
         <div className="case-study-section-icon"><ShieldCheck size={17} /></div>
         <div>
           <h2>ベテランSEレビュー</h2>
+          <p>{question.explanation}</p>
           <p>{question.seniorReview}</p>
-          <p className="case-study-selected-answer">
-            <strong>あなたの判断:</strong> {selectedAnswers.map((index) => question.choices[index]).join(" / ")}
-          </p>
-          {!answer.correct && <p className="case-study-correct-answer"><strong>推奨判断:</strong> {correctAnswerText}</p>}
+          <p>利用者数・停止時間・依存範囲の条件が変われば、同じ案の適合度や別案を選ぶ理由も変わります。</p>
         </div>
       </article>
 
+      <fieldset className="case-study-rationale-factors">
+        <legend>どの情報を重視しましたか？ <small>任意・複数選択可</small></legend>
+        <div>{question.rationaleFactors.map((factor) => <label key={factor}>
+          <input type="checkbox" checked={selectedRationaleFactors.includes(factor)} onChange={() => toggleRationaleFactor(factor)} />
+          <span>{factor}</span>
+        </label>)}</div>
+      </fieldset>
       <label className="case-study-rationale">
-        <span>なぜその判断をしましたか？ <small>任意</small></span>
-        <textarea
-          value={rationale}
-          onChange={(event) => onRationaleChange(event.target.value)}
-          placeholder="例: 停止枠が短く、移行方式の実測と差分同期の確認が必要なため"
-          rows={2}
-        />
+        <span>判断理由をひとこと <small>任意</small></span>
+        <textarea value={rationale} onChange={(event) => onRationaleChange(event.target.value)} placeholder="例: 利用者が多く停止枠が短いため、切戻し可能性と影響範囲を重視した" rows={2} />
       </label>
 
+      {definitions.length > 0 && <section className="case-study-glossary">
+        <h2>用語カード</h2>
+        <div>{definitions.map((entry) => <button key={entry.term} className={openGlossaryTerm === entry.term ? "active" : ""} onClick={() => onGlossaryToggle(entry.term)}>{entry.term}</button>)}</div>
+        {definitions.map((entry) => openGlossaryTerm === entry.term && <article key={entry.term}><strong>{entry.term}</strong><p>{entry.definition}</p></article>)}
+      </section>}
+
       <div className="case-study-action-row">
-        <span>この判断は「{dimensionLabels[question.judgmentDimension]}」として記録されます。</span>
+        <span>判断の適合度と理由は「{dimensionLabels[question.judgmentDimension]}」として集計されます。</span>
         <button className="case-study-primary" onClick={onNext}>
           {isLastCase ? "成績を見る" : "次の案件"} <ArrowRight size={16} />
         </button>
@@ -343,7 +413,7 @@ function CaseReview({
 function FailureSimulation({ question }: { question: CaseQuestion }) {
   return (
     <article className="case-study-failure">
-      <div className="case-study-failure-heading"><AlertTriangle size={19} /><div><span>判断を誤った場合の障害シミュレーション</span><strong>{question.failureScenario.title}</strong></div></div>
+      <div className="case-study-failure-heading"><AlertTriangle size={19} /><div><span>この案でリスクが顕在化した場合のシミュレーション</span><strong>{question.failureScenario.title}</strong></div></div>
       <p>{question.failureScenario.description}</p>
       <div className="case-study-failure-flow" aria-label="障害の流れ">
         {question.failureScenario.flow.map((step, index) => (
@@ -360,7 +430,9 @@ function CaseStudySummary({
   difficulty,
   answers,
   score,
-  correctCount,
+  points,
+  maxPoints,
+  rationaleCount,
   deckSize,
   onRestart,
   onClose,
@@ -368,7 +440,9 @@ function CaseStudySummary({
   difficulty: CaseStudyDifficulty;
   answers: CaseStudyAnswer[];
   score: ReturnType<typeof calculateCaseJudgmentScores>;
-  correctCount: number;
+  points: number;
+  maxPoints: number;
+  rationaleCount: number;
   deckSize: number;
   onRestart: () => void;
   onClose: () => void;
@@ -379,13 +453,14 @@ function CaseStudySummary({
       <span className="case-study-summary-eyebrow">CASE STUDY · REVIEW</span>
       <h1>{completed ? "案件演習の振り返り" : "ここまでの判断を振り返る"}</h1>
       <p>{completed
-        ? `${difficultyLabels[difficulty]}の案件をすべて確認しました。正誤だけでなく、判断領域ごとの傾向も振り返りましょう。`
+        ? `${difficultyLabels[difficulty]}の案件をすべて確認しました。判断領域ごとの適合度と理由を振り返りましょう。`
         : "未回答の案件は次回の開始時に再度出題されます。今回の回答を確認しましょう。"}</p>
 
       <div className="case-study-total-score">
         <div><span>回答した案件</span><strong>{answers.length} / {deckSize}</strong></div>
-        <div><span>適切な判断</span><strong>{correctCount} / {answers.length || 0}</strong></div>
-        <div><span>総合正答率</span><strong>{answers.length ? `${Math.round((correctCount / answers.length) * 100)}%` : "—"}</strong></div>
+        <div><span>判断ポイント</span><strong>{points} / {maxPoints}</strong></div>
+        <div><span>平均適合度</span><strong>{answers.length ? `${Math.round((points / answers.length) * 10) / 10} / 3` : "—"}</strong></div>
+        <div><span>根拠を記録</span><strong>{rationaleCount} / {answers.length}</strong></div>
       </div>
 
       <section className="case-study-dimension-scores">
@@ -395,7 +470,7 @@ function CaseStudySummary({
             const item = score[id];
             return (
               <article key={id}>
-                <div><strong>{title}</strong><span>{item.percentage === null ? "未回答" : `${item.percentage}% · ${item.correct}/${item.total}`}</span></div>
+                <div><strong>{title}</strong><span>{item.percentage === null ? "未回答" : `${item.percentage}% · ${item.points}/${item.maxPoints}`}</span></div>
                 <div className="case-study-score-track"><span style={{ width: `${item.percentage ?? 0}%` }} /></div>
               </article>
             );
@@ -403,7 +478,7 @@ function CaseStudySummary({
         </div>
       </section>
 
-      <p className="case-study-score-note">スコアは選択した判断の正誤を領域ごとに集計します。理由メモはこの演習中の振り返りに使います。</p>
+      <p className="case-study-score-note">スコアは案件条件に対する判断の相対的な適合度（0〜3）です。最高点が常に唯一の正解という意味ではなく、制約や関係者合意によって実務上の選択は変わります。</p>
       <div className="case-study-action-row">
         <button className="case-study-secondary" onClick={onClose}><ArrowLeft size={15} /> デスクトップへ戻る</button>
         <button className="case-study-primary" onClick={onRestart}><RotateCcw size={15} /> 同じ難易度でもう一周</button>

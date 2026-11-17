@@ -41,9 +41,13 @@ describe("case study bank", () => {
       expect(scenario.questions.length).toBeGreaterThan(0);
       for (const question of scenario.questions) {
         expect(question.choices.length).toBeGreaterThan(1);
-        expect(question.correctAnswers.length).toBeGreaterThan(0);
-        expect(new Set(question.correctAnswers).size).toBe(question.correctAnswers.length);
-        expect(question.correctAnswers.every((answer) => answer >= 0 && answer < question.choices.length)).toBe(true);
+        expect(question.choiceReviews).toHaveLength(question.choices.length);
+        expect(question.highestFitChoices.length).toBeGreaterThan(0);
+        expect(new Set(question.highestFitChoices).size).toBe(question.highestFitChoices.length);
+        expect(question.highestFitChoices.every((answer) => answer >= 0 && answer < question.choices.length)).toBe(true);
+        expect(question.highestFitChoices.every((answer) =>
+          question.choiceReviews[answer]?.fit === Math.max(...question.choiceReviews.map(({ fit }) => fit)),
+        )).toBe(true);
         expect(question.failureScenario.flow.length).toBeGreaterThan(1);
       }
     }
@@ -60,23 +64,47 @@ describe("case study bank", () => {
     for (const scenario of shuffled) {
       const sourceQuestion = source.find((item) => item.id === scenario.id)?.questions[0];
       const shuffledQuestion = scenario.questions[0];
-      expect(shuffledQuestion.choices[shuffledQuestion.correctAnswers[0]])
-        .toBe(sourceQuestion?.choices[sourceQuestion.correctAnswers[0]]);
+      expect(shuffledQuestion.choices[shuffledQuestion.highestFitChoices[0]])
+        .toBe(sourceQuestion?.choices[sourceQuestion.highestFitChoices[0]]);
+      expect(shuffledQuestion.choiceReviews[shuffledQuestion.highestFitChoices[0]]?.fit)
+        .toBe(Math.max(...shuffledQuestion.choiceReviews.map(({ fit }) => fit)));
     }
-    expect(shuffled[0].questions[0].correctAnswers).not.toEqual([0]);
+    expect(shuffled[0].questions[0].highestFitChoices).not.toEqual([0]);
   });
 
-  it("scores each decision dimension independently and marks untested dimensions", () => {
+  it("scores condition-fit points by decision dimension and marks untested dimensions", () => {
     const scores = calculateCaseJudgmentScores([
-      { caseId: "dns", judgmentDimension: "riskJudge", correct: true, rationale: "TTL確認" },
-      { caseId: "ad", judgmentDimension: "riskJudge", correct: false, rationale: "" },
-      { caseId: "jdbc", judgmentDimension: "technicalJudge", correct: true, rationale: "接続先確認" },
+      { caseId: "dns", judgmentDimension: "riskJudge", choiceIndex: 0, fit: 3, rationaleFactors: ["利用者数"], rationale: "TTL確認" },
+      { caseId: "ad", judgmentDimension: "riskJudge", choiceIndex: 2, fit: 1, rationaleFactors: [], rationale: "" },
+      { caseId: "jdbc", judgmentDimension: "technicalJudge", choiceIndex: 0, fit: 2, rationaleFactors: ["DB容量・更新量"], rationale: "接続先確認" },
     ]);
 
-    expect(scores.riskJudge).toEqual({ correct: 1, total: 2, percentage: 50 });
-    expect(scores.technicalJudge).toEqual({ correct: 1, total: 1, percentage: 100 });
+    expect(scores.riskJudge).toEqual({ points: 4, maxPoints: 6, total: 2, percentage: 67 });
+    expect(scores.technicalJudge).toEqual({ points: 2, maxPoints: 3, total: 1, percentage: 67 });
     const untouched = caseJudgmentDimensions.find(({ id }) => scores[id].total === 0);
     expect(untouched).toBeDefined();
     expect(untouched && scores[untouched.id].percentage).toBeNull();
+  });
+
+  it("changes the relative judgment fit when the case constraints change", () => {
+    const easyDatabaseCase = caseStudyBank.find((scenario) => scenario.id === "oracle-window-easy");
+    const hardDatabaseCase = caseStudyBank.find((scenario) => scenario.id === "oracle-window-hard");
+    const easyQuestion = easyDatabaseCase?.questions[0];
+    const hardQuestion = hardDatabaseCase?.questions[0];
+
+    expect(easyQuestion?.choiceReviews[0].fit).toBe(3);
+    expect(hardQuestion?.choiceReviews[0].fit).toBe(1);
+    expect(hardQuestion?.choiceReviews[2].fit).toBe(3);
+    expect(hardQuestion?.rehearsal?.result).toContain("185分");
+  });
+
+  it("attaches glossary cards and criteria based on scenario facts", () => {
+    const dnsQuestion = caseStudyBank.find((scenario) => scenario.id === "dns-ttl-hard")?.questions[0];
+
+    expect(dnsQuestion?.glossaryTerms).toContain("TTL");
+    expect(dnsQuestion?.reviewBasis).toContain("利用者数: 5,000人");
+    expect(dnsQuestion?.reviewBasis).toContain("停止可能時間: 15分");
+    expect(dnsQuestion?.rationaleFactors).toContain("利用者数");
+    expect(dnsQuestion?.rationaleFactors).toContain("停止可能時間");
   });
 });
