@@ -24,7 +24,7 @@ import {
   type CaseStudyScenario,
 } from "../domain/case-studies";
 
-type PlayerPhase = "overview" | "question" | "review" | "summary";
+type PlayerPhase = "question" | "review" | "summary";
 
 const difficultyLabels: Record<CaseStudyDifficulty, string> = {
   easy: "初級",
@@ -49,7 +49,7 @@ export function CaseStudyPlayer({
 }) {
   const [deck, setDeck] = useState(() => shuffleCaseStudies(getCaseStudies(difficulty)));
   const [caseIndex, setCaseIndex] = useState(0);
-  const [phase, setPhase] = useState<PlayerPhase>("overview");
+  const [phase, setPhase] = useState<PlayerPhase>("question");
   const [selectedAnswers, setSelectedAnswers] = useState<number[]>([]);
   const [selectedRationaleFactors, setSelectedRationaleFactors] = useState<string[]>([]);
   const [openGlossaryTerm, setOpenGlossaryTerm] = useState<string | null>(null);
@@ -98,7 +98,7 @@ export function CaseStudyPlayer({
     setSelectedRationaleFactors([]);
     setOpenGlossaryTerm(null);
     setRationale("");
-    setPhase("overview");
+    setPhase("question");
   };
 
   const updateRationale = (value: string) => {
@@ -127,7 +127,7 @@ export function CaseStudyPlayer({
     setSelectedRationaleFactors([]);
     setOpenGlossaryTerm(null);
     setRationale("");
-    setPhase("overview");
+    setPhase("question");
   };
 
   return (
@@ -170,28 +170,21 @@ export function CaseStudyPlayer({
             <>
               <div className="case-study-case-heading">
                 <span className="case-study-category">{currentCase.category}</span>
-                <span className={`case-study-phase-label ${phase}`}>{phase === "overview" ? "案件概要" : phase === "question" ? "判断" : "振り返り"}</span>
+                <span className={`case-study-phase-label ${phase}`}>{phase === "question" ? "案件判断" : "振り返り"}</span>
                 <h1>{currentCase.title}</h1>
                 <p>{currentCase.background}</p>
               </div>
 
-              {phase === "overview" && (
-                <>
-                  <CaseConditions scenario={currentCase} />
-                  <div className="case-study-action-row">
-                    <span>条件を確認したら、担当SEとして判断してください。</span>
-                    <button className="case-study-primary" onClick={() => setPhase("question")}>設問へ進む <ArrowRight size={16} /></button>
-                  </div>
-                </>
-              )}
-
               {phase === "question" && (
-                <QuestionPanel
-                  question={question}
-                  selectedAnswers={selectedAnswers}
-                  onChoose={chooseAnswer}
-                  onSubmit={submitAnswer}
-                />
+                <div className="case-study-decision-screen">
+                  <CaseConditions scenario={currentCase} />
+                  <QuestionPanel
+                    question={question}
+                    selectedAnswers={selectedAnswers}
+                    onChoose={chooseAnswer}
+                    onSubmit={submitAnswer}
+                  />
+                </div>
               )}
 
               {phase === "review" && latestAnswer && (

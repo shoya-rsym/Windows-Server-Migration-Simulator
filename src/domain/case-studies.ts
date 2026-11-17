@@ -91,6 +91,10 @@ interface CaseVariant {
   dependencies: string[];
   details: string[];
   question: string;
+  choices?: TradeoffOption[];
+  fitScores?: [number, number, number, number];
+  explanation?: string;
+  seniorReview?: string;
   rehearsal?: {
     result: string;
     implication: string;
@@ -542,11 +546,20 @@ const templates: CaseTemplate[] = [
     failureFlow: ["Data Pump Import", "警告・無効オブジェクト", "未検証で切替", "業務処理失敗"],
     variants: {
       easy: {
-        background: "Data Pump Importは成功しましたが、ログに警告が数件あります。開発担当は接続確認だけで十分だと言っています。",
+        background: "Importは完了しましたが、受注登録で使うPL/SQLパッケージがINVALIDのままです。開発担当は「画面にログインできたので切替可能」と言っています。",
         users: 100, downtimeMinutes: 180, systemType: "小規模な顧客台帳",
         databases: ["Oracle 11g → Oracle 19c"], dependencies: ["Importログ", "Schema", "代表業務処理"],
-        details: ["Import終了: 正常", "警告: 3件", "オブジェクト状態: 未確認"],
-        question: "切替前に行う検証として最も適切なのはどれですか？",
+        details: ["受注登録パッケージ: INVALID", "ログイン: 成功", "業務処理の再試験: 未実施"],
+        question: "ログイン成功だけでは判断できません。受注業務への影響を評価する次の一手は？",
+        choices: [
+          { text: "パッケージの依存先とコンパイルエラーを調べ、修正後に受注登録を業務担当と再試験する", benefit: "不正状態の原因と実業務への影響を直接確認できる", cost: "開発・DBA・業務担当の調整が必要で、解決しない場合は停止枠を使う" },
+          { text: "受注機能だけを一時停止して切替し、担当者と期限を決めた上で後続修正する", benefit: "他機能を使える状態で切替でき、重大障害の影響を局所化できる", cost: "利用者の業務制限と暫定運用の承認が必要になる" },
+          { text: "切替を保留して依存する全PL/SQLを棚卸しし、修復・回帰試験の時間を確保する", benefit: "関連オブジェクトの連鎖影響まで調べてから判断できる", cost: "小規模案件には過剰となり、利用者への日程再調整が発生する" },
+          { text: "オブジェクトを再コンパイルし、エラーが残る場合は旧DBへ戻す条件を合意して限定切替する", benefit: "比較的短時間で状態を改善でき、失敗時の判断条件も準備できる", cost: "再コンパイルだけでは業務動作を証明できず、限定切替にも監視が要る" },
+        ],
+        fitScores: [3, 2, 1, 2],
+        explanation: "Importの終了状態と各オブジェクトの有効状態は別です。INVALIDの原因・依存する処理・実行権限を確認し、受注登録など代表業務で結果を検証します。",
+        seniorReview: "この案件は小規模で停止枠に余裕があります。無効オブジェクトが受注登録に直結するため、ログイン試験だけでGoにせず、修正後の業務確認を判定条件にしましょう。",
       },
       normal: {
         background: "移行前後のテーブル件数は一致しています。一方、権限・シーケンス・無効PL/SQLの確認担当が決まっていません。",
@@ -850,11 +863,20 @@ const templates: CaseTemplate[] = [
     failureFlow: ["新環境で障害", "判断期限を超過", "切戻し困難", "停止時間が拡大"],
     variants: {
       easy: {
-        background: "切替後にログインエラーが発生しました。計画では30分以内に復旧できない場合、切戻し判断を行うことになっています。",
+        background: "切替後15分でログイン成功率が70%に低下しました。認証ログには特定グループの拒否があり、計画上の切戻し判定まで残り15分です。",
         users: 180, downtimeMinutes: 90, systemType: "社内申請システム",
         dependencies: ["障害ログ", "切戻し手順", "業務責任者"],
-        details: ["切替後: 15分", "ログイン成功率: 70%", "判断期限: 30分"],
-        question: "まず何を共有し、どの基準で次の判断を行いますか？",
+        details: ["切替後: 15分", "ログイン成功率: 70%", "対象: 特定グループ", "切戻し判定期限: 30分"],
+        question: "残り15分で影響を抑えつつ判断するため、どの対応を選びますか？",
+        choices: [
+          { text: "認証ログと対象グループを10分で照合し、改善しなければ責任者承認の上で切り戻す", benefit: "原因を絞る時間を確保しつつ、期限内に切戻しへ移れる", cost: "調査が長引くと判定期限を使い切るため、進行管理が必要" },
+          { text: "影響を受けるグループを新APから一時除外し、他の利用者は監視下で継続する", benefit: "利用可能な利用者への影響を限定し、共通障害か個別設定かを見極められる", cost: "対象者の業務を止め、例外経路と復帰連絡を管理する必要がある" },
+          { text: "直ちに業務責任者へ判定状況を共有し、停止枠延長の承認を得られなければ計画どおり切り戻す", benefit: "利用者影響と期限を踏まえ、責任者の合意を得て判断できる", cost: "延長が認められない場合は移行延期となり、再周知が必要" },
+          { text: "旧APを限定的な代替経路として維持し、新APの認証を調査する間は書込み先を一本化する", benefit: "影響利用者の業務継続を図りながら原因調査できる", cost: "新旧経路の切り分けと書込み制御を誤るとデータ不整合が起きる" },
+        ],
+        fitScores: [3, 2, 3, 1],
+        explanation: "この事象は全利用者ではなく特定グループに限定されています。残り15分でログ照合と復旧見込みを確認しつつ、延長承認・影響限定・切戻し準備を並行します。",
+        seniorReview: "「原因が分かるまで調査」ではなく、判定期限・影響範囲・延長可否を基準に選びます。延長する場合も業務責任者の合意と新しい中止時刻を記録してください。",
       },
       normal: {
         background: "新APは一部利用者で動作しますが、主要業務の更新に失敗します。作業計画には切戻し条件が記載されていますが、担当者は原因調査を続けています。",
@@ -1149,7 +1171,7 @@ function getRehearsal(
   variant: CaseVariant,
 ): CaseVariant["rehearsal"] | undefined {
   if (variant.rehearsal) return variant.rehearsal;
-  if (template.category !== "Oracle" && template.category !== "Data Pump") return undefined;
+  if (template.id !== "oracle-window" && template.category !== "Data Pump") return undefined;
   if (difficulty === "easy") {
     return {
       result: "検証リハーサル: EXPDP 45分 + IMPDP 65分 (合計110分)",
@@ -1171,10 +1193,11 @@ function getRehearsal(
 function getChoiceReviews(
   template: CaseTemplate,
   difficulty: CaseStudyDifficulty,
+  variant: CaseVariant,
 ): CaseChoiceReview[] {
-  const options = tradeoffOptions[template.category];
+  const options = variant.choices ?? tradeoffOptions[template.category];
   if (!options) throw new Error(`案件カテゴリの判断選択肢がありません: ${template.category}`);
-  const scores = fitScores[template.id]?.[difficulty];
+  const scores = variant.fitScores ?? fitScores[template.id]?.[difficulty];
   if (!scores) throw new Error(`案件条件に応じた適合度がありません: ${template.id}/${difficulty}`);
   return options.map((option, index) => ({
     benefit: option.benefit,
@@ -1186,15 +1209,16 @@ function getChoiceReviews(
 function getJudgmentReview(
   template: CaseTemplate,
   variant: CaseVariant,
+  options: TradeoffOption[],
   choiceReviews: CaseChoiceReview[],
 ): string {
   const bestFit = Math.max(...choiceReviews.map((review) => review.fit));
   const bestOptions = choiceReviews
     .map((review, index) => ({ review, index }))
     .filter(({ review }) => review.fit === bestFit)
-    .map(({ index }) => tradeoffOptions[template.category][index].text);
+    .map(({ index }) => options[index].text);
   const leadingOption = bestOptions.map((option) => `「${option}」`).join("または");
-  return `利用者${variant.users.toLocaleString()}人・停止可能時間${variant.downtimeMinutes}分を含む条件では、${leadingOption}が相対的に適合度の高い案です。最高評価でも利点だけではなくコストがあり、関係者の合意や追加情報によって別案が妥当になることがあります。${template.seniorReview}`;
+  return `利用者${variant.users.toLocaleString()}人・停止可能時間${variant.downtimeMinutes}分を含む条件では、${leadingOption}が相対的に適合度の高い案です。最高評価でも利点だけではなくコストがあり、関係者の合意や追加情報によって別案が妥当になることがあります。${variant.seniorReview ?? template.seniorReview}`;
 }
 
 export const caseJudgmentDimensions: Array<{
@@ -1211,15 +1235,16 @@ export const caseJudgmentDimensions: Array<{
 export const caseStudyBank: CaseStudyScenario[] = templates.flatMap((template) =>
   caseStudyDifficulties.map((difficulty) => {
     const variant = template.variants[difficulty];
-    const optionReviews = getChoiceReviews(template, difficulty);
+    const options = variant.choices ?? tradeoffOptions[template.category];
+    const optionReviews = getChoiceReviews(template, difficulty, variant);
     const reviewBasis = getReviewBasis(variant);
     const rehearsal = getRehearsal(template, difficulty, variant);
     const questionText = `${variant.question}最も適合する案を選んでください。`;
     const relatedText = [
       template.explanation,
-      template.seniorReview,
+      variant.seniorReview ?? template.seniorReview,
       questionText,
-      ...tradeoffOptions[template.category].flatMap((option) => [option.text, option.benefit, option.cost]),
+      ...options.flatMap((option) => [option.text, option.benefit, option.cost]),
     ].join(" ");
     return {
       id: `${template.id}-${difficulty}`,
@@ -1238,13 +1263,13 @@ export const caseStudyBank: CaseStudyScenario[] = templates.flatMap((template) =
       questions: [{
         id: `${template.id}-${difficulty}-q1`,
         question: questionText,
-        choices: tradeoffOptions[template.category].map((option) => option.text),
+        choices: options.map((option) => option.text),
         highestFitChoices: optionReviews.flatMap((review, index) => review.fit === Math.max(...optionReviews.map((item) => item.fit)) ? [index] : []),
         choiceReviews: optionReviews,
-        explanation: template.explanation,
+        explanation: variant.explanation ?? template.explanation,
         consequenceGood: template.consequenceGood,
         consequenceBad: template.consequenceBad,
-        seniorReview: getJudgmentReview(template, variant, optionReviews),
+        seniorReview: getJudgmentReview(template, variant, options, optionReviews),
         judgmentDimension: template.dimension,
         reviewBasis,
         rationaleFactors: getRationaleFactors(variant),

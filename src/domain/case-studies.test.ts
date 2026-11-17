@@ -64,8 +64,13 @@ describe("case study bank", () => {
     for (const scenario of shuffled) {
       const sourceQuestion = source.find((item) => item.id === scenario.id)?.questions[0];
       const shuffledQuestion = scenario.questions[0];
-      expect(shuffledQuestion.choices[shuffledQuestion.highestFitChoices[0]])
-        .toBe(sourceQuestion?.choices[sourceQuestion.highestFitChoices[0]]);
+      const sourceHighestFitChoices = sourceQuestion?.highestFitChoices
+        .map((index) => sourceQuestion.choices[index])
+        .sort();
+      const shuffledHighestFitChoices = shuffledQuestion.highestFitChoices
+        .map((index) => shuffledQuestion.choices[index])
+        .sort();
+      expect(shuffledHighestFitChoices).toEqual(sourceHighestFitChoices);
       expect(shuffledQuestion.choiceReviews[shuffledQuestion.highestFitChoices[0]]?.fit)
         .toBe(Math.max(...shuffledQuestion.choiceReviews.map(({ fit }) => fit)));
     }
@@ -89,6 +94,7 @@ describe("case study bank", () => {
   it("changes the relative judgment fit when the case constraints change", () => {
     const easyDatabaseCase = caseStudyBank.find((scenario) => scenario.id === "oracle-window-easy");
     const hardDatabaseCase = caseStudyBank.find((scenario) => scenario.id === "oracle-window-hard");
+    const compatibilityCase = caseStudyBank.find((scenario) => scenario.id === "oracle-compatibility-easy");
     const easyQuestion = easyDatabaseCase?.questions[0];
     const hardQuestion = hardDatabaseCase?.questions[0];
 
@@ -96,6 +102,7 @@ describe("case study bank", () => {
     expect(hardQuestion?.choiceReviews[0].fit).toBe(1);
     expect(hardQuestion?.choiceReviews[2].fit).toBe(3);
     expect(hardQuestion?.rehearsal?.result).toContain("185分");
+    expect(compatibilityCase?.questions[0].rehearsal).toBeUndefined();
   });
 
   it("attaches glossary cards and criteria based on scenario facts", () => {
@@ -106,5 +113,31 @@ describe("case study bank", () => {
     expect(dnsQuestion?.reviewBasis).toContain("停止可能時間: 15分");
     expect(dnsQuestion?.rationaleFactors).toContain("利用者数");
     expect(dnsQuestion?.rationaleFactors).toContain("停止可能時間");
+  });
+
+  it("distinguishes import-object remediation from final data synchronization", () => {
+    const importValidation = caseStudyBank.find((scenario) => scenario.id === "datapump-validation-easy");
+    const finalSync = caseStudyBank.find((scenario) => scenario.id === "datapump-final-sync-easy");
+
+    expect(importValidation?.background).toContain("PL/SQLパッケージ");
+    expect(importValidation?.conditions.details).toContain("受注登録パッケージ: INVALID");
+    expect(importValidation?.questions[0].explanation).toContain("オブジェクトの有効状態");
+    expect(importValidation?.questions[0].choices[0]).toContain("依存先");
+    expect(finalSync?.background).toContain("テスト更新");
+    expect(finalSync?.questions[0].explanation).toContain("差分");
+    expect(importValidation?.questions[0].explanation).not.toBe(finalSync?.questions[0].explanation);
+  });
+
+  it("separates authentication outage triage from data-aware rollback planning", () => {
+    const loginIncident = caseStudyBank.find((scenario) => scenario.id === "rollback-window-easy");
+    const dataRollback = caseStudyBank.find((scenario) => scenario.id === "rollback-data-easy");
+
+    expect(loginIncident?.background).toContain("ログイン成功率が70%");
+    expect(loginIncident?.conditions.details).toContain("対象: 特定グループ");
+    expect(loginIncident?.questions[0].choices[0]).toContain("認証ログ");
+    expect(loginIncident?.questions[0].explanation).toContain("特定グループ");
+    expect(dataRollback?.background).toContain("テスト更新");
+    expect(dataRollback?.questions[0].explanation).toContain("DNS切戻し");
+    expect(loginIncident?.questions[0].explanation).not.toBe(dataRollback?.questions[0].explanation);
   });
 });
