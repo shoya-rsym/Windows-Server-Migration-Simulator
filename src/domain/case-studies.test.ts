@@ -34,6 +34,22 @@ describe("case study bank", () => {
     expect(new Set(caseStudyBank.map((scenario) => scenario.id)).size).toBe(60);
   });
 
+  it("uses distinct case context and question at every difficulty level", () => {
+    const groups = new Map<string, typeof caseStudyBank>();
+    for (const scenario of caseStudyBank) {
+      const templateId = scenario.id.slice(0, -(scenario.difficulty.length + 1));
+      groups.set(templateId, [...(groups.get(templateId) ?? []), scenario]);
+    }
+
+    expect(groups.size).toBe(20);
+    for (const scenarios of groups.values()) {
+      expect(scenarios).toHaveLength(3);
+      expect(new Set(scenarios.map(({ background }) => background)).size).toBe(3);
+      expect(new Set(scenarios.map(({ questions }) => questions[0]?.question)).size).toBe(3);
+      expect(new Set(scenarios.map(({ conditions }) => conditions.details.join("|"))).size).toBe(3);
+    }
+  });
+
   it("keeps every answer and failure flow linked to valid case data", () => {
     for (const scenario of caseStudyBank) {
       expect(scenario.conditions.users).toBeGreaterThan(0);
@@ -49,6 +65,7 @@ describe("case study bank", () => {
           question.choiceReviews[answer]?.fit === Math.max(...question.choiceReviews.map(({ fit }) => fit)),
         )).toBe(true);
         expect(question.failureScenario.flow.length).toBeGreaterThan(1);
+        expect(question.seniorReview).not.toContain("最高評価でも利点だけではなくコスト");
       }
     }
   });

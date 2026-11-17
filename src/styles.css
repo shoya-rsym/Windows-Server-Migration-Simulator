@@ -629,6 +629,13 @@ kbd { padding: 2px 5px; color: #7a8799; background: white; border: 1px solid #dc
 .case-study-question-panel { margin-top: 0; }
 .case-study-question-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .case-study-question-title small { color: #75859a; font-size: 11px; }
+.case-study-difficulty-guide { margin-bottom: 13px; padding: 10px 12px; border-left: 3px solid #4f87bd; border-radius: 4px; background: #f1f7fd; }
+.case-study-difficulty-guide strong { color: #365f83; font-size: 12px; }
+.case-study-difficulty-guide p { margin: 3px 0 0; color: #536b83; font-size: 12px; line-height: 1.5; }
+.case-study-difficulty-guide.normal { border-left-color: #9c7bc5; background: #f8f4fc; }
+.case-study-difficulty-guide.normal strong { color: #684b89; }
+.case-study-difficulty-guide.hard { border-left-color: #c2833c; background: #fff8ed; }
+.case-study-difficulty-guide.hard strong { color: #8b5a24; }
 .case-study-question-panel h2 { margin: 0 0 16px; color: #293e59; font-size: 18px; line-height: 1.55; }
 .case-study-choices { display: grid; gap: 8px; }
 .case-study-choice { min-height: 52px; display: flex; align-items: flex-start; gap: 11px; padding: 11px 12px; text-align: left; color: #455970; border: 1px solid #dce4ed; border-radius: 7px; background: #fff; font-size: 13px; line-height: 1.55; cursor: pointer; }

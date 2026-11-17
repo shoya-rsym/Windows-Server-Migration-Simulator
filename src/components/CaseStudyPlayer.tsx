@@ -15,6 +15,7 @@ import {
   calculateCaseJudgmentScores,
   caseGlossary,
   caseJudgmentDimensions,
+  caseStudyDifficultyGuides,
   getCaseStudies,
   shuffleCaseStudies,
   type CaseJudgmentDimension,
@@ -180,6 +181,7 @@ export function CaseStudyPlayer({
                   <CaseConditions scenario={currentCase} />
                   <QuestionPanel
                     question={question}
+                    difficulty={currentCase.difficulty}
                     selectedAnswers={selectedAnswers}
                     onChoose={chooseAnswer}
                     onSubmit={submitAnswer}
@@ -189,6 +191,7 @@ export function CaseStudyPlayer({
 
               {phase === "review" && latestAnswer && (
                 <CaseReview
+                  scenario={currentCase}
                   question={question}
                   answer={latestAnswer}
                   selectedRationaleFactors={selectedRationaleFactors}
@@ -240,11 +243,13 @@ function Condition({ label, value }: { label: string; value: string }) {
 
 function QuestionPanel({
   question,
+  difficulty,
   selectedAnswers,
   onChoose,
   onSubmit,
 }: {
   question: CaseQuestion;
+  difficulty: CaseStudyDifficulty;
   selectedAnswers: number[];
   onChoose: (choiceIndex: number) => void;
   onSubmit: () => void;
@@ -254,6 +259,10 @@ function QuestionPanel({
       <div className="case-study-question-title">
         <span>設問</span>
         <small>利点とコストを比較し、条件に最も合う案を選択</small>
+      </div>
+      <div className={`case-study-difficulty-guide ${difficulty}`}>
+        <strong>{difficultyLabels[difficulty]}で身につける判断</strong>
+        <p>{caseStudyDifficultyGuides[difficulty]}</p>
       </div>
       <h2>{question.question}</h2>
       <div className="case-study-choices">
@@ -287,6 +296,7 @@ function QuestionPanel({
 }
 
 function CaseReview({
+  scenario,
   question,
   answer,
   selectedRationaleFactors,
@@ -298,6 +308,7 @@ function CaseReview({
   onNext,
   isLastCase,
 }: {
+  scenario: CaseStudyScenario;
   question: CaseQuestion;
   answer: CaseStudyAnswer;
   selectedRationaleFactors: string[];
@@ -311,6 +322,26 @@ function CaseReview({
 }) {
   const selectedReview = question.choiceReviews[answer.choiceIndex];
   if (!selectedReview) throw new Error(`回答した選択肢の評価がありません: ${answer.caseId}`);
+  const bestFit = Math.max(...question.choiceReviews.map(({ fit }) => fit));
+  const bestAlternativeIndex = question.highestFitChoices.find((index) => index !== answer.choiceIndex)
+    ?? question.highestFitChoices[0];
+  const bestAlternative = question.choices[bestAlternativeIndex];
+  const bestAlternativeReview = question.choiceReviews[bestAlternativeIndex];
+  if (!bestAlternative || !bestAlternativeReview) {
+    throw new Error(`比較する選択肢がありません: ${question.id}`);
+  }
+  const followUpAction = scenario.difficulty === "hard"
+    ? "判断期限・影響閾値・代替策をGo/No-Go条件として合意"
+    : scenario.difficulty === "normal"
+      ? "担当者・期限・合格条件を決めて証跡を残す"
+      : "確認結果を記録し、次の作業へ進む条件を明確にする";
+  const caseFacts = scenario.conditions.details.slice(0, 2);
+  const caseContext = caseFacts.length > 0
+    ? `この案件では「${caseFacts.join("」「")}」が判断材料です。`
+    : `利用者${scenario.conditions.users.toLocaleString()}人、停止可能時間${scenario.conditions.downtimeMinutes}分の条件です。`;
+  const personalizedReview = answer.fit === bestFit
+    ? `${caseContext}選んだ案の利点は「${selectedReview.benefit}」ですが、「${selectedReview.cost}」は残ります。${followUpAction}してから実行しましょう。`
+    : `${caseContext}選んだ案には「${selectedReview.cost}」が残ります。条件に最も適合する比較案「${bestAlternative}」は「${bestAlternativeReview.benefit}」を得られます。選んだ案を採る場合は、残るリスクを受容する根拠と承認者を明確にしてください。`;
   const toggleRationaleFactor = (factor: string) => {
     onRationaleFactorsChange(selectedRationaleFactors.includes(factor)
       ? selectedRationaleFactors.filter((item) => item !== factor)
@@ -369,9 +400,7 @@ function CaseReview({
         <div className="case-study-section-icon"><ShieldCheck size={17} /></div>
         <div>
           <h2>ベテランSEレビュー</h2>
-          <p>{question.explanation}</p>
-          <p>{question.seniorReview}</p>
-          <p>利用者数・停止時間・依存範囲の条件が変われば、同じ案の適合度や別案を選ぶ理由も変わります。</p>
+          <p>{personalizedReview}</p>
         </div>
       </article>
 

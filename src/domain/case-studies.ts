@@ -82,6 +82,12 @@ const difficultyLabels: Record<CaseStudyDifficulty, string> = {
   hard: "上級",
 };
 
+export const caseStudyDifficultyGuides: Record<CaseStudyDifficulty, string> = {
+  easy: "明示された主な問題を一つ見つけ、基本の確認や対処を選びます。",
+  normal: "複数の条件を照らし、担当者・期限・合格条件を組み立てます。",
+  hard: "時間・影響・不確実性が競合する中で、継続・延期・制限・切戻しの条件を判断します。",
+};
+
 interface CaseVariant {
   background: string;
   users: number;
@@ -1206,21 +1212,6 @@ function getChoiceReviews(
   }));
 }
 
-function getJudgmentReview(
-  template: CaseTemplate,
-  variant: CaseVariant,
-  options: TradeoffOption[],
-  choiceReviews: CaseChoiceReview[],
-): string {
-  const bestFit = Math.max(...choiceReviews.map((review) => review.fit));
-  const bestOptions = choiceReviews
-    .map((review, index) => ({ review, index }))
-    .filter(({ review }) => review.fit === bestFit)
-    .map(({ index }) => options[index].text);
-  const leadingOption = bestOptions.map((option) => `「${option}」`).join("または");
-  return `利用者${variant.users.toLocaleString()}人・停止可能時間${variant.downtimeMinutes}分を含む条件では、${leadingOption}が相対的に適合度の高い案です。最高評価でも利点だけではなくコストがあり、関係者の合意や追加情報によって別案が妥当になることがあります。${variant.seniorReview ?? template.seniorReview}`;
-}
-
 export const caseJudgmentDimensions: Array<{
   id: CaseJudgmentDimension;
   title: string;
@@ -1269,7 +1260,7 @@ export const caseStudyBank: CaseStudyScenario[] = templates.flatMap((template) =
         explanation: variant.explanation ?? template.explanation,
         consequenceGood: template.consequenceGood,
         consequenceBad: template.consequenceBad,
-        seniorReview: getJudgmentReview(template, variant, options, optionReviews),
+        seniorReview: variant.seniorReview ?? template.seniorReview,
         judgmentDimension: template.dimension,
         reviewBasis,
         rationaleFactors: getRationaleFactors(variant),
