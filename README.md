@@ -2,18 +2,20 @@
 
 案件の調査・判断・計画・実施・確認・障害対応を安全に学ぶシミュレータープラットフォームです。実サーバーや外部サービスには接続せず、各アプリ内のシナリオ状態だけを操作します。
 
+対象は経験0〜10年の新人〜中堅SEです。製品操作やコード構文の暗記ではなく、未経験案件で何を確認し、誰へ相談し、何を根拠に判断・説明するかを学ぶことを優先します。学習はObservation（全体理解）、Case Study（条件判断）、Playbook（未経験案件の確認支援）の3層で設計します。
+
 ## Monorepo構成
 
 | パス | 役割 |
 |---|---|
 | `apps/infrastructure-project-simulator` | 既存のWindows Server移行シミュレーター |
-| `apps/development-project-simulator` | EC商品検索機能の開発案件における判断演習プロトタイプ |
+| `apps/development-project-simulator` | EC商品検索案件の12判断演習。資料・要件・計画・設計・実装・試験・公開・運用を扱う |
 | `packages/shared-engine` | 共通SEスキル、案件ライフサイクル、状態・イベント型 |
 | `packages/story-mode` / `packages/case-study-mode` | 観察・問題集の共通型と補助ロジック |
 | `packages/advisor-engine` / `packages/scoring-engine` | 助言境界と共通評価ロジック |
 | `packages/project-desk` / `packages/shared-learning-assets` | 案件デスク型、用語・判断フレーム |
 
-Developmentアプリの「実装」は実際にコードを書く機能ではなく、開発工程の判断演習です。共有パッケージは共通基盤の第一段階であり、既存アプリの全機能や画面が切り出し済みという意味ではありません。
+Developmentアプリは、顧客依頼・関係者ヒアリング・API資料・性能調査・セキュリティ標準・QA結果・運用引継ぎを参照しながら、要件定義から運用まで12の判断を進める短編演習です。選択後には利点・残るリスク・その判断の結果・次工程への引継ぎを表示します。「実装」は実際にコードを書く機能ではなく、開発工程の判断演習です。共有パッケージは共通基盤の第一段階であり、既存アプリの全機能や画面が切り出し済みという意味ではありません。
 
 ## Windowsで起動
 

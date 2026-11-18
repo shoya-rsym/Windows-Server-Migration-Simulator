@@ -10,7 +10,29 @@ export type SESkill =
   | "riskManagement"
   | "incidentResponse"
   | "operation"
-  | "projectManagement";
+  | "projectManagement"
+  | "decisionMaking";
+
+export type LearningLayer = "observation" | "case-study" | "playbook";
+export type ProficiencyLevel = "foundation" | "participation" | "independent";
+
+export interface LearningObjective {
+  id: string;
+  title: string;
+  layer: LearningLayer;
+  skills: SESkill[];
+  proficiency: ProficiencyLevel;
+  description: string;
+}
+
+export interface PlaybookSection {
+  id: string;
+  title: string;
+  questions: string[];
+  outputs: string[];
+  reviewPoints: string[];
+  risks: string[];
+}
 
 export type ProjectLifecyclePhase =
   | "investigation"
