@@ -17,8 +17,8 @@ if not exist "node_modules\vite\bin\vite.js" (
     if errorlevel 1 goto install_failed
 )
 
-echo シミュレーターを起動しています。ブラウザーが開くまでお待ちください。
-call npm run dev:infrastructure -- --host 127.0.0.1 --open
+echo シミュレーター一覧を起動しています。ブラウザーが開くまでお待ちください。
+call npm run dev
 if errorlevel 1 (
     echo.
     echo 起動に失敗しました。上のエラーメッセージを確認してください。

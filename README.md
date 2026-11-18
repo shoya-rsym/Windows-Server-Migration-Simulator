@@ -19,7 +19,7 @@ Developmentアプリは、顧客依頼・関係者ヒアリング・API資料・
 
 ## Windowsで起動
 
-対応するNode.js（20.19以降の20系、または22.12以降）をインストールし、エクスプローラーでリポジトリを開いて **`Start Simulator.bat`** をダブルクリックします。初回起動時に依存関係をインストールし、既定のブラウザーで開きます。終了時は起動したコンソールで `Ctrl+C` を押してください。
+対応するNode.js（20.19以降の20系、または22.12以降）をインストールし、エクスプローラーでリポジトリを開いて **`Start Simulator.bat`** をダブルクリックします。ブラウザーにプラットフォームTOP画面が開き、Windows Server移行シミュレーターまたはEC商品開発シミュレーターを選択できます。初回起動時は依存関係を自動でインストールします。終了時は起動したコンソールで `Ctrl+C` を押してください。
 
 開発時の回帰テストは`npm test`、型チェックと本番ビルドは`npm run build`で実行します。
 
@@ -128,6 +128,7 @@ DB移行コマンドは教育用の疑似操作です。各方式はスキーマ
 
 ```bash
 npm install
+npm run dev
 npm run dev:infrastructure
 npm run dev:development
 npm run build

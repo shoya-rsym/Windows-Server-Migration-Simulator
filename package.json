@@ -8,7 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev:infrastructure",
+    "dev": "node scripts/start-platform.mjs",
+    "dev:platform": "node scripts/start-platform.mjs",
     "dev:infrastructure": "npm run dev --workspace @se-simulator/infrastructure-project-simulator --",
     "dev:development": "npm run dev --workspace @se-simulator/development-project-simulator --",
     "build": "npm run build --workspaces --if-present",
