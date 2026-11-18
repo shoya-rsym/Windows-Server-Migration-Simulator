@@ -1,6 +1,19 @@
-# System Engineer Project Simulator
+# System Engineer Simulator Platform
 
-Windows Server更改を題材に、資料調査・判断・計画・移行・切替・障害対応を体験する日本語のシステムエンジニア案件シミュレーターです。実サーバーやAWS/Azureには接続せず、シナリオJSONの状態だけを操作します。
+案件の調査・判断・計画・実施・確認・障害対応を安全に学ぶシミュレータープラットフォームです。実サーバーや外部サービスには接続せず、各アプリ内のシナリオ状態だけを操作します。
+
+## Monorepo構成
+
+| パス | 役割 |
+|---|---|
+| `apps/infrastructure-project-simulator` | 既存のWindows Server移行シミュレーター |
+| `apps/development-project-simulator` | EC商品検索機能の開発案件における判断演習プロトタイプ |
+| `packages/shared-engine` | 共通SEスキル、案件ライフサイクル、状態・イベント型 |
+| `packages/story-mode` / `packages/case-study-mode` | 観察・問題集の共通型と補助ロジック |
+| `packages/advisor-engine` / `packages/scoring-engine` | 助言境界と共通評価ロジック |
+| `packages/project-desk` / `packages/shared-learning-assets` | 案件デスク型、用語・判断フレーム |
+
+Developmentアプリの「実装」は実際にコードを書く機能ではなく、開発工程の判断演習です。共有パッケージは共通基盤の第一段階であり、既存アプリの全機能や画面が切り出し済みという意味ではありません。
 
 ## Windowsで起動
 
@@ -82,7 +95,7 @@ DB移行コマンドは教育用の疑似操作です。各方式はスキーマ
 
 ## シナリオ追加
 
-`src/data/scenarios/*.json` の各JSONが案件です。起動時にJSONを自動検出するため、基本的にはファイル追加だけで案件選択に表示されます。Zodで構造と参照を実行時検証します。
+`apps/infrastructure-project-simulator/src/data/scenarios/*.json` の各JSONがInfrastructureアプリの案件です。起動時にJSONを自動検出するため、基本的にはファイル追加だけで案件選択に表示されます。Zodで構造と参照を実行時検証します。Developmentアプリの演習は現時点では`apps/development-project-simulator/src/scenario.ts`で定義します。
 
 シナリオには次を定義します。
 
@@ -113,6 +126,8 @@ DB移行コマンドは教育用の疑似操作です。各方式はスキーマ
 
 ```bash
 npm install
-npm run dev
+npm run dev:infrastructure
+npm run dev:development
 npm run build
+npm test
 ```

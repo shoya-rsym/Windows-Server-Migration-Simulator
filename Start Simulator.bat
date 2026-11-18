@@ -18,7 +18,7 @@ if not exist "node_modules\vite\bin\vite.js" (
 )
 
 echo シミュレーターを起動しています。ブラウザーが開くまでお待ちください。
-call npm run dev -- --host 127.0.0.1 --open
+call npm run dev:infrastructure -- --host 127.0.0.1 --open
 if errorlevel 1 (
     echo.
     echo 起動に失敗しました。上のエラーメッセージを確認してください。

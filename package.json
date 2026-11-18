@@ -1,13 +1,20 @@
 {
-  "name": "windows-server-migration-simulator",
+  "name": "system-engineer-simulator-platform",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.1.0",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "npm run dev:infrastructure",
+    "dev:infrastructure": "npm run dev --workspace @se-simulator/infrastructure-project-simulator --",
+    "dev:development": "npm run dev --workspace @se-simulator/development-project-simulator --",
+    "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview:infrastructure": "npm run preview --workspace @se-simulator/infrastructure-project-simulator",
+    "preview:development": "npm run preview --workspace @se-simulator/development-project-simulator"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

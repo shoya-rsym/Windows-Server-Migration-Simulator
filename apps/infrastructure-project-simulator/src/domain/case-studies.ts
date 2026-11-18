@@ -1,80 +1,25 @@
-export type CaseStudyDifficulty = "easy" | "normal" | "hard";
+import { calculateCaseJudgmentScores as scoreCaseAnswers } from "@se-simulator/case-study-mode";
+import type {
+  CaseChoiceReview,
+  CaseJudgmentDimension,
+  CaseJudgmentScores,
+  CaseStudyAnswer,
+  CaseStudyDifficulty,
+  CaseStudyScenario,
+} from "@se-simulator/case-study-mode";
 
-export type CaseJudgmentDimension =
-  | "technicalJudge"
-  | "operationJudge"
-  | "riskJudge"
-  | "communicationJudge"
-  | "rollbackJudge";
-
-export interface CaseStudyConditions {
-  users: number;
-  downtimeMinutes: number;
-  systemType: string;
-  databases?: string[];
-  dependencies?: string[];
-  details: string[];
-}
-
-export interface CaseQuestion {
-  id: string;
-  question: string;
-  choices: string[];
-  highestFitChoices: number[];
-  choiceReviews: CaseChoiceReview[];
-  explanation: string;
-  consequenceGood: string;
-  consequenceBad: string;
-  seniorReview: string;
-  judgmentDimension: CaseJudgmentDimension;
-  reviewBasis: string[];
-  rationaleFactors: string[];
-  glossaryTerms: string[];
-  rehearsal?: {
-    result: string;
-    implication: string;
-  };
-  failureScenario: {
-    title: string;
-    description: string;
-    impact: string;
-    flow: string[];
-  };
-}
-
-export interface CaseChoiceReview {
-  benefit: string;
-  cost: string;
-  fit: number;
-}
-
-export interface CaseStudyScenario {
-  id: string;
-  title: string;
-  category: string;
-  difficulty: CaseStudyDifficulty;
-  background: string;
-  conditions: CaseStudyConditions;
-  questions: CaseQuestion[];
-}
-
-export interface CaseStudyAnswer {
-  caseId: string;
-  judgmentDimension: CaseJudgmentDimension;
-  choiceIndex: number;
-  fit: number;
-  rationaleFactors: string[];
-  rationale: string;
-}
-
-export interface CaseJudgmentScore {
-  points: number;
-  maxPoints: number;
-  total: number;
-  percentage: number | null;
-}
-
-export type CaseJudgmentScores = Record<CaseJudgmentDimension, CaseJudgmentScore>;
+export type {
+  CaseChoiceReview,
+  CaseJudgmentDimension,
+  CaseJudgmentScore,
+  CaseJudgmentScores,
+  CaseQuestion,
+  CaseStudyAnswer,
+  CaseStudyConditions,
+  CaseStudyDifficulty,
+  CaseStudyScenario,
+} from "@se-simulator/case-study-mode";
+export { caseJudgmentDimensions } from "@se-simulator/case-study-mode";
 
 const difficultyLabels: Record<CaseStudyDifficulty, string> = {
   easy: "初級",
@@ -1212,17 +1157,6 @@ function getChoiceReviews(
   }));
 }
 
-export const caseJudgmentDimensions: Array<{
-  id: CaseJudgmentDimension;
-  title: string;
-}> = [
-  { id: "technicalJudge", title: "技術判断" },
-  { id: "operationJudge", title: "運用判断" },
-  { id: "riskJudge", title: "リスク管理" },
-  { id: "communicationJudge", title: "関係者調整" },
-  { id: "rollbackJudge", title: "切戻し判断" },
-];
-
 export const caseStudyBank: CaseStudyScenario[] = templates.flatMap((template) =>
   caseStudyDifficulties.map((difficulty) => {
     const variant = template.variants[difficulty];
@@ -1314,15 +1248,5 @@ export function shuffleCaseStudies(
 }
 
 export function calculateCaseJudgmentScores(answers: readonly CaseStudyAnswer[]): CaseJudgmentScores {
-  return Object.fromEntries(caseJudgmentDimensions.map(({ id }) => {
-    const matching = answers.filter((answer) => answer.judgmentDimension === id);
-    const points = matching.reduce((total, answer) => total + answer.fit, 0);
-    const maxPoints = matching.length * 3;
-    return [id, {
-      points,
-      maxPoints,
-      total: matching.length,
-      percentage: matching.length === 0 ? null : Math.round((points / maxPoints) * 100),
-    }];
-  })) as CaseJudgmentScores;
+  return scoreCaseAnswers(answers);
 }

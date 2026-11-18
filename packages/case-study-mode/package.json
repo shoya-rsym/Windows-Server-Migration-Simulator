@@ -1,0 +1,13 @@
+{
+  "name": "@se-simulator/case-study-mode",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@se-simulator/scoring-engine": "*",
+    "@se-simulator/shared-engine": "*"
+  }
+}

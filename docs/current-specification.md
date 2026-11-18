@@ -1,4 +1,4 @@
-# System Engineer Project Simulator 現行仕様書
+# System Engineer Simulator Platform 現行仕様書
 
 ## 1. 文書の目的
 
@@ -11,16 +11,24 @@
 
 ## 2. システム概要
 
-Windows Server更改案件を題材に、新人SEが技術作業だけでなく、現行調査、案件資料の読解、関係者調整、移行計画、切替判断、障害対応、切戻しを疑似体験する日本語SPAです。
+本リポジトリは、案件共通の学習ロジックを共有パッケージとして段階的に整備し、InfrastructureとDevelopmentの案件シミュレーターを提供するnpm workspaces Monorepoです。各アプリは独立したReact SPAです。
 
 | 項目 | 現行仕様 |
 |---|---|
-| アプリケーション | React + TypeScript + Vite |
+| アプリケーション | React + TypeScript + Vite、npm workspaces |
 | 主な表示 | Windows風デスクトップ、シミュレーション作業画面、案件デスク |
-| 案件定義 | `src/data/scenarios/*.json` |
+| Infrastructure案件定義 | `apps/infrastructure-project-simulator/src/data/scenarios/*.json` |
+| Development案件定義 | `apps/development-project-simulator/src/scenario.ts`（現段階では固定のプロトタイプ） |
+| 共通パッケージ | `packages/` 配下の7 workspace |
 | 状態保存 | ブラウザーの`localStorage`。シミュレーション保存形式はversion 2 |
 | 外部接続 | なし。操作・コマンド・クラウド・助言はアプリ内の疑似処理 |
 | シナリオ検証 | Zodによる構造・参照・一部の整合性検証 |
+
+### Monorepoアプリ
+
+- **Infrastructure Project Simulator** — 既存のWindows Server移行シミュレーター。既存の学習モードと案件機能を維持します。
+- **Development Project Simulator** — EC商品検索機能の要件確認からリリースまでを扱う判断演習プロトタイプです。「実装」工程もコード編集ではなく、実務上の判断を選ぶ演習です。
+- **共有パッケージ** — 共通の状態・イベント・SEスキル、Story/Case Study型、案件デスク型、助言境界、学習資産、採点補助を提供します。既存Infrastructure UIやドメイン全体の共通化は未完了です。
 
 ### 学習対象
 

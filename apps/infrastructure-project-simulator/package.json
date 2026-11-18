@@ -1,0 +1,21 @@
+{
+  "name": "@se-simulator/infrastructure-project-simulator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@se-simulator/advisor-engine": "*",
+    "@se-simulator/case-study-mode": "*",
+    "@se-simulator/project-desk": "*",
+    "@se-simulator/story-mode": "*",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "zod": "^4.6.7"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@se-simulator/development-project-simulator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@se-simulator/advisor-engine": "*",
+    "@se-simulator/case-study-mode": "*",
+    "@se-simulator/project-desk": "*",
+    "@se-simulator/scoring-engine": "*",
+    "@se-simulator/shared-engine": "*",
+    "@se-simulator/shared-learning-assets": "*",
+    "@se-simulator/story-mode": "*",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  }
+}
